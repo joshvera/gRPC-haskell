@@ -244,6 +244,14 @@ serverRegisterCompletionQueue :: C.Server -> CompletionQueue -> IO ()
 serverRegisterCompletionQueue server CompletionQueue{..} =
   C.grpcServerRegisterCompletionQueue server unsafeCQ C.reserved
 
+-- | Kills all pending requests for incoming RPC calls, shuts down listening on the port for incoming channels,
+-- then iterates through all channels on the server and sends a shutdown message to the clients.
+--
+-- The transport layer then guarantees the following:
+-- * Sends shutdown to the client (for eg: HTTP2 transport sends GOAWAY).
+-- * If the server has outstanding calls that are in the process, the
+--  connection is NOT closed until the server is done with all those calls.
+-- * Once, there are no more calls in progress, the channel is closed.
 serverShutdownAndNotify :: C.Server -> CompletionQueue -> C.Tag -> IO ()
 serverShutdownAndNotify server CompletionQueue{..} tag =
   C.grpcServerShutdownAndNotify server unsafeCQ tag
