@@ -85,22 +85,22 @@ endpoint (Host h) (Port p) = Endpoint (h <> ":" <> pack (show p))
 -- library. Note that we use a DataKind-ed phantom type to help constrain use of
 -- different kinds of registered methods.
 data RegisteredMethod (mt :: GRPCMethodType) where
-  RegisteredMethodNormal :: MethodName
-                            -> Endpoint
-                            -> C.CallHandle
-                            -> RegisteredMethod 'Normal
+  RegisteredMethodNormal          :: MethodName
+                                  -> Endpoint
+                                  -> C.CallHandle
+                                  -> RegisteredMethod 'Normal
   RegisteredMethodClientStreaming :: MethodName
-                                     -> Endpoint
-                                     -> C.CallHandle
-                                     -> RegisteredMethod 'ClientStreaming
+                                  -> Endpoint
+                                  -> C.CallHandle
+                                  -> RegisteredMethod 'ClientStreaming
   RegisteredMethodServerStreaming :: MethodName
-                                     -> Endpoint
-                                     -> C.CallHandle
-                                     -> RegisteredMethod 'ServerStreaming
-  RegisteredMethodBiDiStreaming :: MethodName
-                                   -> Endpoint
-                                   -> C.CallHandle
-                                   -> RegisteredMethod 'BiDiStreaming
+                                  -> Endpoint
+                                  -> C.CallHandle
+                                  -> RegisteredMethod 'ServerStreaming
+  RegisteredMethodBiDiStreaming   :: MethodName
+                                  -> Endpoint
+                                  -> C.CallHandle
+                                  -> RegisteredMethod 'BiDiStreaming
 
 instance Show (RegisteredMethod a) where
   show (RegisteredMethodNormal x y z) =
