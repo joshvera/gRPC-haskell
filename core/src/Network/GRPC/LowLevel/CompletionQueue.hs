@@ -108,6 +108,12 @@ createCompletionQueueForPluckNonPolling _ = do
 -- | Very simple wrapper around 'grpcCallStartBatch'. Throws 'GRPCIOShutdown'
 -- without calling 'grpcCallStartBatch' if the queue is shutting down.
 -- Throws 'CallError' if 'grpcCallStartBatch' returns a non-OK code.
+--
+-- Starts a batch of operations given an array of operations. When complete, posts a completion of type 'tag' to the
+-- given completion queue bound to the call.
+--
+-- Calls to grpcCallStartBatch are synchronized with a call to 'withPermission'. At a future point in time it may be
+-- useful to synchronize send operations differently from receive operations.
 startBatch :: CompletionQueue -> C.Call -> C.OpArray -> Int -> C.Tag
               -> IO (Either GRPCIOError ())
 startBatch cq@CompletionQueue{..} call opArray opArraySize tag =
@@ -118,6 +124,9 @@ startBatch cq@CompletionQueue{..} call opArray opArraySize tag =
       grpcDebug "startBatch: grpc_call_start_batch call returned."
       return res
 
+-- | Create an RPC call on a channel. When created, it is in a configuration state
+-- allowing properties to be set until it is invoked. After invoke, the Call
+-- can have messages written to it and read from it.
 channelCreateCall :: C.Channel
                   -> Maybe (ServerCall a)
                   -> C.PropagationMask

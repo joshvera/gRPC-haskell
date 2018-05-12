@@ -147,8 +147,8 @@ data ClientCall = ClientCall { unsafeCC :: C.Call }
 clientCallCancel :: ClientCall -> IO ()
 clientCallCancel cc = C.grpcCallCancel (unsafeCC cc) C.reserved
 
--- | Represents one registered GRPC call on the server. Contains pointers to all
--- the C state needed to respond to a registered call.
+-- | Represents one registered GRPC call (.i.e request) on the server. Contains pointers to all
+-- the C state needed to respond to the request.
 data ServerCall a = ServerCall
   { unsafeSC            :: C.Call
   , callCQ              :: CompletionQueue
@@ -157,6 +157,10 @@ data ServerCall a = ServerCall
   , callDeadline        :: TimeSpec
   } deriving (Functor, Show)
 
+-- | Cancel a server call. If a status has not been received for the call,
+-- sets it to the status code and string passed in.
+--
+-- May be called multiple times, from any thread before 'destroyClientCall'.
 serverCallCancel :: ServerCall a -> C.StatusCode -> String -> IO ()
 serverCallCancel sc code reason =
   C.grpcCallCancelWithStatus (unsafeSC sc) code reason C.reserved
@@ -179,6 +183,7 @@ mgdPayload mt
 mgdPtr :: forall a. Storable a => Managed (Ptr a)
 mgdPtr = managed (bracket malloc free)
 
+-- | Returns whether the server call has exceeded its call deadline.
 serverCallIsExpired :: ServerCall a -> IO Bool
 serverCallIsExpired sc = do
   currTime <- getTime Monotonic
