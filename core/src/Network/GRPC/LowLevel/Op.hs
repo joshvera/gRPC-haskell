@@ -213,10 +213,9 @@ runOps call cq ops =
       tag <- newTag cq
       grpcDebug $ "runOps: tag: " ++ show tag
       callError <- startBatch cq call opArray l tag
-      grpcDebug $ "runOps: called start_batch. callError: "
-                   ++ (show callError)
+      grpcDebug $ "runOps: called start_batch."
       case callError of
-        Left x -> return $ Left x
+        Left x -> grpcDebug ("runOps: callError:" ++ show callError) >> return (Left x)
         Right () -> do
           ev <- pluck cq tag Nothing
           grpcDebug $ "runOps: pluck returned " ++ show ev

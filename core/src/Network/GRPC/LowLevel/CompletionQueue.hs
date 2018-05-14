@@ -150,8 +150,8 @@ channelCreateCall
 -- | Create the call object to handle a registered call.
 serverRequestCall :: RegisteredMethod mt
                   -> C.Server
-                  -> CompletionQueue -- ^ server CQ
-                  -> CompletionQueue -- ^ call CQ
+                  -> CompletionQueue -- The server queue bound to the call.
+                  -> CompletionQueue -- The request queue for notifications.
                   -> IO (Either GRPCIOError (ServerCall (MethodPayload mt)))
 serverRequestCall rm s scq ccq =
   -- NB: The method type dictates whether or not a payload is present, according
