@@ -85,7 +85,10 @@ createCompletionQueueForNext _ = do
 
 createCompletionQueueForPluck :: GRPC -> IO CompletionQueue
 createCompletionQueueForPluck _ = do
-  unsafeCQ <- C.grpcCompletionQueueCreateForPluck C.reserved
+  let attrs = C.QueueAttributes 1 C.CqNext C.CqDefaultPolling
+  unsafeCQ <- F.with attrs $ \attrsPtr -> do
+    factory <- C.grpcCompletionQueueFactoryLookup attrsPtr
+    C.grpcCompletionQueueCreate factory attrsPtr C.reserved
   currentPluckers <- newTVarIO 0
   currentPushers <- newTVarIO 0
   shuttingDown <- newTVarIO False
