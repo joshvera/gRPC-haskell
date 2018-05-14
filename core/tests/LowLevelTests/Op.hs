@@ -16,7 +16,7 @@ import           Network.GRPC.LowLevel.Op
 
 lowLevelOpTests :: TestTree
 lowLevelOpTests = testGroup "Synchronous unit tests of low-level Op interface"
-  [testCancelFromServer]
+  []
 
 testCancelFromServer :: TestTree
 testCancelFromServer =

@@ -116,7 +116,7 @@ pluck' :: CompletionQueue
 pluck' CompletionQueue{..} tag mwait =
   maybe C.withInfiniteDeadline C.withDeadlineSeconds mwait $ \dead -> do
     grpcDebug $ "pluck: blocking on grpc_completion_queue_pluck for tag=" ++ show tag
-    ev <- C.grpcCompletionQueuePluck unsafeCQ tag dead C.reserved
+    ev <- C.grpcCompletionQueueNext unsafeCQ dead C.reserved
     grpcDebug $ "pluck finished: " ++ show ev
     return $ if isEventSuccessful ev then Right () else eventToError ev
 
@@ -181,7 +181,7 @@ shutdownCompletionQueueForPluck scq@CompletionQueue{..} = do
           grpcDebug "drainLoop: before pluck() call"
           tag <- newTag scq
           ev <- C.withDeadlineSeconds 1 $ \deadline ->
-                  C.grpcCompletionQueuePluck unsafeCQ tag deadline C.reserved
+                  C.grpcCompletionQueueNext unsafeCQ deadline C.reserved
           grpcDebug $ "drainLoop: pluck() call got " ++ show ev
           case C.eventCompletionType ev of
             C.QueueShutdown -> return (Right ())

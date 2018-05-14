@@ -73,7 +73,7 @@ withCompletionQueueForPluck grpc = bracket (createCompletionQueueForPluck grpc)
 
 createCompletionQueueForNext :: GRPC -> IO CompletionQueue
 createCompletionQueueForNext _ = do
-  let attrs = C.QueueAttributes 1 C.CqNext C.CqNonListening
+  let attrs = C.QueueAttributes 1 C.CqNext C.CqDefaultPolling
   unsafeCQ <- F.with attrs $ \attrsPtr -> do
     factory <- C.grpcCompletionQueueFactoryLookup attrsPtr
     C.grpcCompletionQueueCreate factory attrsPtr C.reserved
