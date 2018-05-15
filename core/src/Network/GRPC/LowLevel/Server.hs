@@ -36,13 +36,10 @@ import qualified Data.Set as S
 import           Network.GRPC.LowLevel.Call
 import           Network.GRPC.LowLevel.CompletionQueue (CompletionQueue,
                                                         createCompletionQueueForPluck,
-                                                        createCompletionQueueForPluckNonPolling,
                                                         createCompletionQueueForNext,
                                                         pluck,
-                                                        next',
                                                         serverRegisterCompletionQueue,
                                                         serverRequestCall,
-                                                        serverRequestAsyncCall,
                                                         serverShutdownAndNotify,
                                                         shutdownCompletionQueueForPluck,
                                                         shutdownCompletionQueueForNext)
@@ -203,6 +200,7 @@ stopServer Server{ unsafeServer = s, .. } = do
   grpcDebug "stopServer: call grpc_server_destroy."
   C.grpcServerDestroy s
   grpcDebug "stopServer: shutting down CQ."
+  -- Queues must be shut down after the server is destroyed.
   shutdownCQ serverCQ
   shutdownCQ serverCallCQ
 
@@ -215,12 +213,6 @@ stopServer Server{ unsafeServer = s, .. } = do
             Left _ -> do putStrLn "Warning: completion queue didn't shut down."
                          putStrLn "Trying to stop server anyway."
             Right _ -> return ()
-        shutdownAsyncCQ scq = do
-                  shutdownResult <- shutdownCompletionQueueForNext scq
-                  case shutdownResult of
-                    Left _ -> do putStrLn "Warning: completion queue didn't shut down."
-                                 putStrLn "Trying to stop server anyway."
-                    Right _ -> return ()
         shutdownNotify scq = do
           let shutdownTag = C.tag 0
           serverShutdownAndNotify s scq shutdownTag
@@ -351,31 +343,12 @@ serverCreateCall :: Server
 serverCreateCall Server{..} rm =
   serverRequestCall rm unsafeServer serverCQ serverCallCQ
 
-serverCreateAsyncCall :: Server
-                 -> RegisteredMethod mt
-                 -> IO (Either GRPCIOError (ServerCall (MethodPayload mt)))
-serverCreateAsyncCall Server{..} rm =
-  serverRequestAsyncCall rm unsafeServer serverCQ serverCallCQ
-
 withServerCall :: Server
                -> RegisteredMethod mt
                -> (ServerCall (MethodPayload mt) -> IO (Either GRPCIOError a))
                -> IO (Either GRPCIOError a)
 withServerCall s rm f =
     serverCreateCall s rm >>= \case
-      Left e  -> return (Left e)
-      Right c -> do
-        debugServerCall c
-        f c `finally` do
-          grpcDebug "withServerCall(R): destroying."
-          destroyServerCall c
-
-withServerAsyncCall :: Server
-               -> RegisteredMethod mt
-               -> (ServerCall (MethodPayload mt) -> IO (Either GRPCIOError a))
-               -> IO (Either GRPCIOError a)
-withServerAsyncCall s rm f =
-    serverCreateAsyncCall s rm >>= \case
       Left e  -> return (Left e)
       Right c -> do
         debugServerCall c
