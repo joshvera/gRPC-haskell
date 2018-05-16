@@ -115,9 +115,9 @@ pluck' :: CompletionQueue
        -> IO (Either GRPCIOError ())
 pluck' CompletionQueue{..} tag mwait =
   maybe C.withInfiniteDeadline C.withDeadlineSeconds mwait $ \dead -> do
-    grpcDebug $ "pluck: blocking on grpc_completion_queue_pluck for tag=" ++ show tag
+    grpcDebug $ "next: blocking on grpc_completion_queue_pluck for tag=" ++ show tag
     ev <- C.grpcCompletionQueueNext unsafeCQ dead C.reserved
-    grpcDebug $ "pluck finished: " ++ show ev
+    grpcDebug $ "next finished: " ++ show ev
     return $ if isEventSuccessful ev then Right () else eventToError ev
 
 -- | Translate 'C.Event' to an error. The caller is responsible for ensuring
