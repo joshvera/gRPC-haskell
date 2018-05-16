@@ -49,6 +49,10 @@ import qualified Network.GRPC.Unsafe                   as C
 import qualified Network.GRPC.Unsafe.ChannelArgs       as C
 import qualified Network.GRPC.Unsafe.Op                as C
 import qualified Network.GRPC.Unsafe.Security          as C
+import qualified Data.HashMap.Strict as HashMap
+import Data.HashMap.Strict (HashMap)
+
+data CallData = CallData
 
 -- | Wraps various gRPC state needed to run a server.
 data Server = Server
@@ -66,6 +70,7 @@ data Server = Server
   , serverConfig         :: ServerConfig
   , outstandingForks     :: TVar (S.Set ThreadId)
   , serverShuttingDown   :: TVar Bool
+  , inProgressRequests :: TVar (HashMap C.Tag CallData)
   }
 
 -- TODO: should we make a forkGRPC function instead? I am not sure if it would
@@ -186,8 +191,9 @@ startServer grpc conf@ServerConfig{..} =
     C.grpcServerStart server
     forks <- newTVarIO S.empty
     shutdown <- newTVarIO False
+    inProgressRequests <- newTVarIO mempty
     return $ Server grpc server (Port actualPort) cq ccq ns ss cs bs conf forks
-      shutdown
+      shutdown inProgressRequests
 
 stopServer :: Server -> IO ()
 -- TODO: Do method handles need to be freed?
