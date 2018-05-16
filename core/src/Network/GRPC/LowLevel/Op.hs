@@ -18,7 +18,7 @@ import           Foreign.Ptr                           (Ptr, nullPtr)
 import           Foreign.Storable                      (peek)
 import           Network.GRPC.LowLevel.CompletionQueue
 import           Network.GRPC.LowLevel.GRPC
-import qualified Network.GRPC.Unsafe                   as C (Call)
+import qualified Network.GRPC.Unsafe                   as C (Call, Tag)
 import qualified Network.GRPC.Unsafe.ByteBuffer        as C
 import qualified Network.GRPC.Unsafe.Metadata          as C
 import qualified Network.GRPC.Unsafe.Op                as C
@@ -224,6 +224,26 @@ runOps call cq ops =
               grpcDebug "runOps: got good op; starting."
               fmap (Right . catMaybes) $ mapM resultFromOpContext contexts
             Left err -> return $ Left err
+
+runOpsAsync :: C.Call
+          -- ^ 'Call' that this batch is associated with. One call can be
+          -- associated with many batches.
+       -> CompletionQueue
+          -- ^ Queue on which our tag will be placed once our ops are done
+          -- running.
+       -> C.Tag
+          -- ^ The Tag associated with the list of operations.
+       -> [Op]
+          -- ^ The list of 'Op's to execute.
+       -> IO (Either GRPCIOError ())
+runOpsAsync call cq tag ops =
+  let l = length ops in
+    withOpArrayAndCtxts ops $ \(opArray, contexts) -> do
+      grpcDebug $ "runOpsAsync: allocated op contexts: " ++ show contexts
+      grpcDebug $ "runOpsAsync: tag: " ++ show tag
+      callError <- startBatch cq call opArray l tag
+      grpcDebug $ "runOpsAsync: called start_batch."
+      pure callError
 
 runOps' :: C.Call
         -> CompletionQueue
