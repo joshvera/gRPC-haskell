@@ -24,7 +24,7 @@ import           System.Timeout                                 (timeout)
 -- 1. Set the shuttingDown 'TVar' to 'True'. When this is set, no new pluck
 --    calls will be allowed to start.
 -- 2. Wait until no threads are plucking, as counted by 'currentPluckers'.
--- This logic can be seen in 'pluck' and 'shutdownCompletionQueue'.
+-- This logic can be seen in 'next' and 'shutdownCompletionQueue'.
 
 -- NOTE: There is one more possible race condition: pushing work onto the queue
 -- after we begin to shut down.
@@ -106,14 +106,14 @@ pluck :: CompletionQueue -> C.Tag -> Maybe TimeoutSeconds
          -> IO (Either GRPCIOError ())
 pluck cq@CompletionQueue{..} tag mwait = do
   grpcDebug $ "pluck: called with tag=" ++ show tag ++ ",mwait=" ++ show mwait
-  withPermission Pluck cq $ pluck' cq tag mwait
+  withPermission Pluck cq $ next' cq tag mwait
 
--- Variant of pluck' which assumes pluck permission has been granted.
-pluck' :: CompletionQueue
+-- Variant of next' which assumes pluck permission has been granted.
+next' :: CompletionQueue
        -> C.Tag
        -> Maybe TimeoutSeconds
        -> IO (Either GRPCIOError ())
-pluck' CompletionQueue{..} tag mwait =
+next' CompletionQueue{..} tag mwait =
   maybe C.withInfiniteDeadline C.withDeadlineSeconds mwait $ \dead -> do
     grpcDebug $ "next: blocking on grpc_completion_queue_pluck for tag=" ++ show tag
     ev <- C.grpcCompletionQueueNext unsafeCQ dead C.reserved

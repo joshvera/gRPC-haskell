@@ -53,12 +53,12 @@ serverRequestCall s scq ccq =
             let
               rec = do
                 -- yield every second, for interruptibility
-                r <- pluck' scq tag (Just 1)
+                r <- next' scq tag (Just 1)
                 case r of
                   Left GRPCIOTimeout -> rec
                   _ -> return r
             r <- rec
-            dbug $ "pluck' finished: " ++ show r
+            dbug $ "next' finished: " ++ show r
             return r
           lift $
             U.ServerCall
