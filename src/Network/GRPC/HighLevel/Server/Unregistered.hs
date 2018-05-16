@@ -15,9 +15,41 @@ import           Control.Monad
 import           Data.Foldable                             (find)
 import           Network.GRPC.HighLevel.Server
 import           Network.GRPC.LowLevel
+import Network.GRPC.LowLevel.Call   (mgdPtr)
 import qualified Network.GRPC.LowLevel.Call.Unregistered   as U
 import qualified Network.GRPC.LowLevel.Server.Unregistered as U
+import Network.GRPC.LowLevel.Server
 import           Proto3.Suite.Class
+import qualified Network.GRPC.Unsafe                            as C
+import qualified Network.GRPC.Unsafe.Metadata                   as C
+import qualified Network.GRPC.Unsafe.Time                       as C
+import           Control.Monad.Managed
+import           Foreign.Storable                               (peek)
+import           Network.GRPC.LowLevel.CompletionQueue.Internal (newTag, CompletionQueue(..))
+
+data CallState = Create Server C.Tag | Process U.ServerCall | Finish
+
+createCallData server tag = processCallData (Create server tag)
+
+processCallData :: CallState -> IO CallState
+processCallData = \case
+  (Create server tag) ->
+    with allocs $ \(call, metadata, callDetails) -> do
+      metadataPtr  <- peek metadata
+      let callQueue = unsafeCQ (serverCallCQ server)
+      callError <- C.grpcServerRequestCall (unsafeServer server) call callDetails metadataPtr callQueue (unsafeCQ . serverCQ $ server) tag
+      case callError of
+        C.CallOk -> do
+          Process <$> (U.ServerCall
+            <$> peek call
+            <*> return (serverCallCQ server)
+            <*> return tag
+            <*> C.getAllMetadataArray metadataPtr
+            <*> (C.timeSpec <$> C.callDetailsGetDeadline callDetails)
+            <*> (MethodName <$> C.callDetailsGetMethod   callDetails)
+            <*> (Host       <$> C.callDetailsGetHost     callDetails))
+    where
+      allocs = (,,) <$> mgdPtr <*> managed C.withMetadataArrayPtr <*> managed C.withCallDetails
 
 dispatchLoop :: Server
              -> (String -> IO ())
@@ -27,7 +59,16 @@ dispatchLoop :: Server
              -> [Handler 'ServerStreaming]
              -> [Handler 'BiDiStreaming]
              -> IO ()
-dispatchLoop s logger md hN hC hS hB =
+dispatchLoop s logger md hN hC hS hB = do
+  firstRequestTag <- newTag (serverCQ s)
+  initialCallData <- createCallData s firstRequestTag -- C.grpcServerRequestCall >> returns (Process ServerCall)
+  insertCall s tag processInitialCallData
+
+  forever $ do
+    event <- next' completionQueue
+    let clientCallData = lookupTag (eventTag tag)
+    processCallData clientCallData
+
   forever $ U.withServerCallAsync s $ \sc ->
     case findHandler sc allHandlers of
       Just (AnyHandler ah) -> case ah of
