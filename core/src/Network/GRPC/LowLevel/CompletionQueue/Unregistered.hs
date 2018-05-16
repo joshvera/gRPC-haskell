@@ -64,6 +64,7 @@ serverRequestCall s scq ccq =
             U.ServerCall
               <$> peek call
               <*> return ccq
+              <*> return tag
               <*> C.getAllMetadataArray md
               <*> (C.timeSpec <$> C.callDetailsGetDeadline cd)
               <*> (MethodName <$> C.callDetailsGetMethod   cd)
