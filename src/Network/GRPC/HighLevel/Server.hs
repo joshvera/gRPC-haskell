@@ -8,6 +8,7 @@
 
 module Network.GRPC.HighLevel.Server where
 
+import Network.GRPC.LowLevel.Server (ServerHandler)
 import qualified Control.Exception                         as CE
 import           Control.Monad
 import           Data.ByteString                           (ByteString)
@@ -35,10 +36,6 @@ data ServerResponse (streamType :: GRPCMethodType) response where
                        -> ServerResponse 'ServerStreaming response
   ServerBiDiResponse :: MetadataMap -> StatusCode -> StatusDetails
                      -> ServerResponse 'BiDiStreaming response
-
-type ServerHandler a b =
-  ServerCall a
-  -> IO (b, MetadataMap, StatusCode, StatusDetails)
 
 convertGeneratedServerHandler ::
   (ServerRequest 'Normal request response -> IO (ServerResponse 'Normal response))

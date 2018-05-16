@@ -120,6 +120,16 @@ next' CompletionQueue{..} tag mwait =
     grpcDebug $ "next finished: " ++ show ev
     return $ if isEventSuccessful ev then Right () else eventToError ev
 
+next :: CompletionQueue
+       -> Maybe TimeoutSeconds
+       -> IO (Either GRPCIOError C.Event)
+next CompletionQueue{..} mwait =
+  maybe C.withInfiniteDeadline C.withDeadlineSeconds mwait $ \dead -> do
+    grpcDebug $ "next: blocking on grpc_completion_queue_next"
+    ev <- C.grpcCompletionQueueNext unsafeCQ dead C.reserved
+    grpcDebug $ "next finished: " ++ show ev
+    return $ if isEventSuccessful ev then Right ev else eventToError ev
+
 -- | Translate 'C.Event' to an error. The caller is responsible for ensuring
 -- that the event actually corresponds to an error condition; a successful event
 -- will be translated to a 'GRPCIOUnknownError'.

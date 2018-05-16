@@ -7,7 +7,9 @@
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE ViewPatterns        #-}
 {-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE PolyKinds #-}
 
 -- | This module defines data structures and operations pertaining to registered
 -- servers using registered calls; for unregistered support, see
@@ -51,11 +53,11 @@ import qualified Network.GRPC.Unsafe.Op                as C
 import qualified Network.GRPC.Unsafe.Security          as C
 import qualified Data.HashMap.Strict as HashMap
 import Data.HashMap.Strict (HashMap)
-
-data CallData = CallData
+import qualified Network.GRPC.LowLevel.Call.Unregistered  as U
+import Data.Maybe (isNothing, isJust)
 
 -- | Wraps various gRPC state needed to run a server.
-data Server = Server
+data Server handler = Server
   { serverGRPC           :: GRPC
   , unsafeServer         :: C.Server
   , listeningPort        :: Port
@@ -70,8 +72,44 @@ data Server = Server
   , serverConfig         :: ServerConfig
   , outstandingForks     :: TVar (S.Set ThreadId)
   , serverShuttingDown   :: TVar Bool
-  , inProgressRequests :: TVar (HashMap C.Tag CallData)
+  , inProgressRequests   :: TVar (HashMap C.Tag (CallState handler))
   }
+
+type ServerHandler a b = ServerCall a -> IO (b, MetadataMap, C.StatusCode, C.StatusDetails)
+
+data CallState handler where
+  Create :: C.Tag -> CallState handler
+  Process :: U.ServerCall -> CallState handler
+  MessageResult :: U.ServerCall -> C.OpArray -> [OpContext] -> CallState handler
+  MessageSent :: U.ServerCall -> C.OpArray -> [OpContext] -> CallState handler
+  Finish :: CallState handler
+
+lookupCall :: Server handler -> C.Tag -> IO (Maybe (CallState handler))
+lookupCall s t = atomically $ HashMap.lookup t <$> readTVar (inProgressRequests s)
+
+
+insertCall :: Server handler -> C.Tag -> CallState handler -> IO ()
+insertCall s t state = do
+  wasPresent <- atomically $ do
+    mEntry <- HashMap.lookup t <$> readTVar (inProgressRequests s)
+    mEntry <$ modifyTVar' (inProgressRequests s) (HashMap.insert t state)
+  when (isJust wasPresent) (grpcDebug ("Warning: overwriting key " ++ show t))
+
+
+replaceCall :: Server handler -> C.Tag -> CallState handler -> IO ()
+replaceCall s t state = do
+  wasPresent <- atomically $ do
+    mEntry <- HashMap.lookup t <$> readTVar (inProgressRequests s)
+    mEntry <$ modifyTVar' (inProgressRequests s) (HashMap.insert t state)
+  when (isNothing wasPresent) (grpcDebug ("Warning: replacing non-present key " ++ show t))
+
+
+deleteCall :: Server handler -> C.Tag -> IO ()
+deleteCall s t = do
+  wasPresent <- atomically $ do
+    mEntry <- HashMap.lookup t <$> readTVar (inProgressRequests s)
+    mEntry <$ modifyTVar' (inProgressRequests s) (HashMap.delete t)
+  when (isNothing wasPresent) (grpcDebug ("Warning: deleting non-present key " ++ show t))
 
 -- TODO: should we make a forkGRPC function instead? I am not sure if it would
 -- be safe to let the call handlers threads keep running after the server stops,
@@ -86,7 +124,7 @@ data Server = Server
 -- The purpose of this is to prevent memory access
 -- errors at the C level of the library, not to ensure that application layer
 -- operations in user code complete successfully.
-forkServer :: Server -> IO () -> IO Bool
+forkServer :: Server handler -> IO () -> IO Bool
 forkServer Server{..} f = do
   shutdown <- readTVarIO serverShuttingDown
   case shutdown of
@@ -162,7 +200,7 @@ addPort server conf@ServerConfig{..} =
            C.serverAddSecureHttp2Port server e creds
   where e = unEndpoint $ serverEndpoint conf
 
-startServer :: GRPC -> ServerConfig -> IO Server
+startServer :: GRPC -> ServerConfig -> IO (Server handler)
 startServer grpc conf@ServerConfig{..} =
   C.withChannelArgs serverArgs $ \args -> do
     let e = serverEndpoint conf
@@ -195,7 +233,7 @@ startServer grpc conf@ServerConfig{..} =
     return $ Server grpc server (Port actualPort) cq ccq ns ss cs bs conf forks
       shutdown inProgressRequests
 
-stopServer :: Server -> IO ()
+stopServer :: Server handler -> IO ()
 -- TODO: Do method handles need to be freed?
 stopServer Server{ unsafeServer = s, .. } = do
   grpcDebug "stopServer: calling shutdownNotify on shutdown queue."
@@ -242,7 +280,7 @@ stopServer Server{ unsafeServer = s, .. } = do
           grpcDebug "Server shutdown: All forks cleaned up."
 
 -- Uses 'bracket' to safely start and stop a server, even if exceptions occur.
-withServer :: GRPC -> ServerConfig -> (Server -> IO a) -> IO a
+withServer :: GRPC -> ServerConfig -> (Server handler -> IO a) -> IO a
 withServer grpc cfg = bracket (startServer grpc cfg) stopServer
 
 -- | Less precisely-typed registration function used in
@@ -343,13 +381,13 @@ serverRegisterMethodBiDiStreaming internalServer meth e = do
 
 -- | Create a 'Call' with which to wait for the invocation of a registered
 -- method.
-serverCreateCall :: Server
+serverCreateCall :: Server handler
                  -> RegisteredMethod mt
                  -> IO (Either GRPCIOError (ServerCall (MethodPayload mt)))
 serverCreateCall Server{..} rm =
   serverRequestCall rm unsafeServer serverCQ serverCallCQ
 
-withServerCall :: Server
+withServerCall :: Server handler
                -> RegisteredMethod mt
                -> (ServerCall (MethodPayload mt) -> IO (Either GRPCIOError a))
                -> IO (Either GRPCIOError a)
@@ -370,7 +408,7 @@ type ServerReaderHandlerLL
   -> StreamRecv ByteString
   -> IO (Maybe ByteString, MetadataMap, C.StatusCode, StatusDetails)
 
-serverReader :: Server
+serverReader :: Server handler
              -> RegisteredMethod 'ClientStreaming
              -> MetadataMap -- ^ Initial server metadata
              -> ServerReaderHandlerLL
@@ -378,7 +416,7 @@ serverReader :: Server
 serverReader s rm initMeta f =
   withServerCall s rm (\sc -> serverReader' s sc initMeta f)
 
-serverReader' :: Server
+serverReader' :: Server handler
               -> ServerCall (MethodPayload 'ClientStreaming)
               -> MetadataMap -- ^ Initial server metadata
               -> ServerReaderHandlerLL
@@ -400,7 +438,7 @@ type ServerWriterHandlerLL
   -> IO (MetadataMap, C.StatusCode, StatusDetails)
 
 -- | Wait for and then handle a registered, server-streaming call.
-serverWriter :: Server
+serverWriter :: Server handler
              -> RegisteredMethod 'ServerStreaming
              -> MetadataMap -- ^ Initial server metadata
              -> ServerWriterHandlerLL
@@ -408,7 +446,7 @@ serverWriter :: Server
 serverWriter s rm initMeta f =
   withServerCall s rm (\sc -> serverWriter' s sc initMeta f)
 
-serverWriter' :: Server
+serverWriter' :: Server handler
               -> ServerCall (MethodPayload 'ServerStreaming)
               -> MetadataMap
               -> ServerWriterHandlerLL
@@ -428,7 +466,7 @@ type ServerRWHandlerLL
   -> StreamSend ByteString
   -> IO (MetadataMap, C.StatusCode, StatusDetails)
 
-serverRW :: Server
+serverRW :: Server handler
          -> RegisteredMethod 'BiDiStreaming
          -> MetadataMap -- ^ initial server metadata
          -> ServerRWHandlerLL
@@ -436,7 +474,7 @@ serverRW :: Server
 serverRW s rm initMeta f =
   withServerCall s rm (\sc -> serverRW' s sc initMeta f)
 
-serverRW' :: Server
+serverRW' :: Server handler
           -> ServerCall (MethodPayload 'BiDiStreaming)
           -> MetadataMap
           -> ServerRWHandlerLL

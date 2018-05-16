@@ -21,12 +21,12 @@ import           Network.GRPC.LowLevel.Server                       (Server (..)
                                                                      serverRW')
 import qualified Network.GRPC.Unsafe.Op                             as C
 
-serverCreateCall :: Server
+serverCreateCall :: Server handler
                  -> IO (Either GRPCIOError ServerCall)
 serverCreateCall Server{..} =
   serverRequestCall unsafeServer serverCQ serverCallCQ
 
-withServerCall :: Server
+withServerCall :: Server handler
                -> (ServerCall -> IO (Either GRPCIOError a))
                -> IO (Either GRPCIOError a)
 withServerCall s f =
@@ -41,7 +41,7 @@ withServerCall s f =
 -- Handles cleaning up the call safely.
 -- Because this function doesn't wait for the handler to return, it cannot
 -- return errors.
-withServerCallAsync :: Server
+withServerCallAsync :: Server handler
                     -> (ServerCall -> IO ())
                     -> IO ()
 withServerCallAsync s f =
@@ -71,14 +71,14 @@ type ServerHandler
   -> IO (ByteString, MetadataMap, C.StatusCode, StatusDetails)
 
 -- | Handle one unregistered call.
-serverHandleNormalCall :: Server
+serverHandleNormalCall :: Server handler
                        -> MetadataMap -- ^ Initial server metadata.
                        -> ServerHandler
                        -> IO (Either GRPCIOError ())
 serverHandleNormalCall s initMeta f =
   withServerCall s $ \c -> serverHandleNormalCall' s c initMeta f
 
-serverHandleNormalCall' :: Server
+serverHandleNormalCall' :: Server handler
                         -> ServerCall
                         -> MetadataMap -- ^ Initial server metadata.
                         -> ServerHandler
@@ -115,14 +115,14 @@ serverHandleNormalCall'
                   return $ Right ()
           x -> error $ "impossible pattern match: " ++ show x
 
-serverReader :: Server
+serverReader :: Server handler
              -> ServerCall
              -> MetadataMap -- ^ Initial server metadata
              -> ServerReaderHandlerLL
              -> IO (Either GRPCIOError ())
 serverReader s = serverReader' s . convertCall
 
-serverWriter :: Server
+serverWriter :: Server handler
              -> ServerCall
              -> MetadataMap -- ^ Initial server metadata
              -> ServerWriterHandlerLL
@@ -132,7 +132,7 @@ serverWriter s sc@ServerCall{ unsafeSC = c, callCQ = ccq } initMeta f =
     bs <- recvInitialMessage c ccq
     ExceptT (serverWriter' s (const bs <$> convertCall sc) initMeta f)
 
-serverRW :: Server
+serverRW :: Server handler
          -> ServerCall
          -> MetadataMap -- ^ Initial server metadata
          -> ServerRWHandlerLL

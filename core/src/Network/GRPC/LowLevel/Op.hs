@@ -226,38 +226,41 @@ runOps call cq ops =
             Left err -> return $ Left err
 
 runOpsAsync :: C.Call
-          -- ^ 'Call' that this batch is associated with. One call can be
-          -- associated with many batches.
-       -> CompletionQueue
-          -- ^ Queue on which our tag will be placed once our ops are done
-          -- running.
-       -> C.Tag
-          -- ^ The Tag associated with the list of operations.
-       -> [Op]
-          -- ^ The list of 'Op's to execute.
-       -> IO AsyncOpResult
-runOpsAsync call cq tag ops =
+            -- ^ 'Call' that this batch is associated with. One call can be
+            -- associated with many batches.
+            -> CompletionQueue
+            -- ^ Queue on which our tag will be placed once our ops are done
+            -- running.
+            -> C.Tag
+            -- ^ The Tag associated with the list of operations.
+            -> [Op]
+            -- ^ The list of 'Op's to execute.
+            -> ((C.OpArray, [OpContext]) -> IO b)
+            -> IO (Either GRPCIOError b)
+runOpsAsync call cq tag ops fun =
   let l = length ops in do
     (opArray, contexts) <- allocOpArrayAndCtxs ops
     grpcDebug $ "runOpsAsync: allocated op contexts: " ++ show contexts
     grpcDebug $ "runOpsAsync: tag: " ++ show tag
+    grpcDebug $ "runOpsAsync: tag: " ++ show tag
+    value <- fun (opArray, contexts)
     callError <- startBatch cq call opArray l tag
-    grpcDebug $ "runOpsAsync: called start_batch."
-    pure $ case callError of
-      Left e -> Failed e
-      Right _ -> Continue opArray contexts $ do
+    grpcDebug "runOpsAsync: called start_batch."
+    case callError of
+      Left x -> grpcDebug ("runOpsAsync: callError:" ++ show callError) >> return (Left x)
+      Right () -> pure (Right value)
 
-data AsyncOpResult
-  = Continue C.OpArray [OpContext]
-  | Failed GRPCIOError
+teardownOpArrayAndContexts array contexts = do
+  C.opArrayDestroy array (length contexts)
+  mapM_ freeOpContext contexts
 
 allocOpArrayAndCtxs :: [Op] -> IO (C.OpArray, [OpContext])
 allocOpArrayAndCtxs ops = do
-  ctxs <- traverse createOpContext ops
+  contexts <- traverse createOpContext ops
   let l = length ops
   arr <- C.opArrayCreate l
-  sequence_ $ zipWith (setOpArray arr) [0..l-1] ctxts
-  return (arr, ctxts)
+  sequence_ $ zipWith (setOpArray arr) [0..l-1] contexts
+  return (arr, contexts)
 
 
 runOps' :: C.Call
