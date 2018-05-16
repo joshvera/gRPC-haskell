@@ -186,20 +186,6 @@ loopWError i o@ServerOptions{..} f = do
    f >>= handleCallError optLogger
    loopWError (i + 1) o f
 
--- -- TODO: options for setting initial/trailing metadata
--- handleLoop :: Server
---            -> ServerOptions
---            -> (Handler a, RegisteredMethod a)
---            -> IO ()
--- handleLoop s o (UnaryHandler _ f, rm) =
---   loopWError 0 o $ serverHandleNormalCall s rm mempty $ convertServerHandler f
--- handleLoop s o (ClientStreamHandler _ f, rm) =
---   loopWError 0 o $ serverReader s rm mempty $ convertServerReaderHandler f
--- handleLoop s o (ServerStreamHandler _ f, rm) =
---   loopWError 0 o $ serverWriter s rm mempty $ convertServerWriterHandler f
--- handleLoop s o (BiDiStreamHandler _ f, rm) =
---   loopWError 0 o $ serverRW s rm mempty $ convertServerRWHandler f
-
 data ServerOptions = ServerOptions
   { optNormalHandlers       :: [Handler 'Normal]
     -- ^ Handlers for unary (non-streaming) calls.
