@@ -27,12 +27,12 @@ import           Control.Monad.Managed
 import           Foreign.Storable                               (peek)
 import           Network.GRPC.LowLevel.CompletionQueue.Internal (newTag, CompletionQueue(..))
 
-data CallState = Create Server C.Tag | Process U.ServerCall | Finish
+data CallState = Create Server C.Tag | Process U.ServerCall | MessageResult ServerCall OpArray OpContexts | Finish
 
 createCallData server tag = processCallData (Create server tag)
 
-processCallData :: CallState -> IO CallState
-processCallData = \case
+processCallData :: CallState -> Event -> IO CallState
+processCallData callState event= case callState of
   (Create server tag) ->
     with allocs $ \(call, metadata, callDetails) -> do
       metadataPtr  <- peek metadata
@@ -48,6 +48,29 @@ processCallData = \case
             <*> (C.timeSpec <$> C.callDetailsGetDeadline callDetails)
             <*> (MethodName <$> C.callDetailsGetMethod   callDetails)
             <*> (Host       <$> C.callDetailsGetHost     callDetails))
+    (Process serverCall) ->
+      nextTag <- newTag (callCQ serverCall)
+      nextCall <- createCallData s nextTag
+      insertCall s nextTag nextCall -- atomically
+
+      runOpsAsync serverCall callQueue [ OpSendInitialMetadata initMeta , OpRecvMessage ] $ \(array, contexts) -> do
+        let state = MessageResult serverCall array contexts
+        replaceCall s (tag serverCall) state
+        pure state
+    (MessageResult serverCall array contexts) -> do
+      payload <- readContexts
+      -- TODO bracket this call
+      teardownArrayAndContexts array contexts
+
+      case payload of
+        Right [OpRecvMessageResult (Just body)] -> do
+          let operations = [ OpRecvCloseOnServer , OpSendMessage rsp, OpSendStatusFromServer trailMeta st ds ]
+          runOpsAsync serverCall callQueue operations $ \(array, contexts) -> do
+            let state = MessageSent serverCall array contexts
+            replaceCall s (tag serverCall) state
+            pure state
+    (MessageSent serverCall array contexts) -> do
+      teardownArrayAndContexts array contexts
     where
       allocs = (,,) <$> mgdPtr <*> managed C.withMetadataArrayPtr <*> managed C.withCallDetails
 
@@ -67,7 +90,7 @@ dispatchLoop s logger md hN hC hS hB = do
   forever $ do
     event <- next' completionQueue
     let clientCallData = lookupTag (eventTag tag)
-    processCallData clientCallData
+    processCallData clientCallData event
 
   forever $ U.withServerCallAsync s $ \sc ->
     case findHandler sc allHandlers of
@@ -85,7 +108,7 @@ dispatchLoop s logger md hN hC hS hB = do
 
     unaryHandler :: (Message a, Message b) => U.ServerCall -> ServerHandler a b -> IO ()
     unaryHandler sc h =
-      handleError $
+      handleError $ do
         U.serverHandleNormalCall' s sc md $ \_sc' bs ->
           convertServerHandler h (const bs <$> U.convertCall sc)
 

@@ -235,15 +235,30 @@ runOpsAsync :: C.Call
           -- ^ The Tag associated with the list of operations.
        -> [Op]
           -- ^ The list of 'Op's to execute.
-       -> IO (Either GRPCIOError ())
+       -> IO AsyncOpResult
 runOpsAsync call cq tag ops =
-  let l = length ops in
-    withOpArrayAndCtxts ops $ \(opArray, contexts) -> do
-      grpcDebug $ "runOpsAsync: allocated op contexts: " ++ show contexts
-      grpcDebug $ "runOpsAsync: tag: " ++ show tag
-      callError <- startBatch cq call opArray l tag
-      grpcDebug $ "runOpsAsync: called start_batch."
-      pure callError
+  let l = length ops in do
+    (opArray, contexts) <- allocOpArrayAndCtxs ops
+    grpcDebug $ "runOpsAsync: allocated op contexts: " ++ show contexts
+    grpcDebug $ "runOpsAsync: tag: " ++ show tag
+    callError <- startBatch cq call opArray l tag
+    grpcDebug $ "runOpsAsync: called start_batch."
+    pure $ case callError of
+      Left e -> Failed e
+      Right _ -> Continue opArray contexts $ do
+
+data AsyncOpResult
+  = Continue C.OpArray [OpContext]
+  | Failed GRPCIOError
+
+allocOpArrayAndCtxs :: [Op] -> IO (C.OpArray, [OpContext])
+allocOpArrayAndCtxs ops = do
+  ctxs <- traverse createOpContext ops
+  let l = length ops
+  arr <- C.opArrayCreate l
+  sequence_ $ zipWith (setOpArray arr) [0..l-1] ctxts
+  return (arr, ctxts)
+
 
 runOps' :: C.Call
         -> CompletionQueue
