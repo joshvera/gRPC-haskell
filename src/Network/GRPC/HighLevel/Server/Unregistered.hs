@@ -66,9 +66,6 @@ processCallData server callState event allHandlers = case callState of
           <*> (C.timeSpec <$> C.callDetailsGetDeadline callDetails)
           <*> (MethodName <$> C.callDetailsGetMethod   callDetails)
           <*> (Host       <$> C.callDetailsGetHost     callDetails)
-        -- C.free callPtr
-        -- C.metadataArrayDestroy metadata
-        -- C.destroyCallDetails callDetails
 
         grpcDebug "Send initial metadata"
         runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag [ OpSendInitialMetadata (U.metadata serverCall), OpRecvMessage ] $ \(array, contexts) -> do
@@ -105,7 +102,7 @@ processCallData server callState event allHandlers = case callState of
   (AcknowledgeResponse serverCall (callPtr, metadataPtr, callDetails) tag array contexts) -> do
 
     teardownOpArrayAndContexts array contexts
-    C.metadataArrayDestroy metadataPtr 
+    C.metadataArrayDestroy metadataPtr
     C.destroyCallDetails callDetails
     C.free callPtr
     deleteCall server tag
