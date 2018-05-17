@@ -9,7 +9,7 @@
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 -- | This module defines data structures and operations pertaining to registered
 -- servers using registered calls; for unregistered support, see
@@ -40,6 +40,7 @@ import           Network.GRPC.LowLevel.CompletionQueue (CompletionQueue,
                                                         createCompletionQueueForPluck,
                                                         createCompletionQueueForNext,
                                                         pluck,
+                                                        next,
                                                         serverRegisterCompletionQueue,
                                                         serverRequestCall,
                                                         serverShutdownAndNotify,
@@ -102,21 +103,21 @@ data CallState where
   AcknowledgeResponse :: U.ServerCall -> (Ptr C.Call, Ptr C.MetadataArray, C.CallDetails) -> C.Tag -> C.OpArray -> [OpContext] -> CallState
   Finish :: CallState
 
-lookupCall :: Server -> C.Tag -> IO (Maybe (CallState))
+lookupCall :: AsyncServer -> C.Tag -> IO (Maybe (CallState))
 lookupCall s t = HashMap.lookup t <$> readIORef (inProgressRequests s)
 
 
-insertCall :: Server -> C.Tag -> CallState -> IO ()
+insertCall :: AsyncServer -> C.Tag -> CallState -> IO ()
 insertCall s t state =
   atomicModifyIORef' (inProgressRequests s) (\a -> (HashMap.insert t state a, ()))
 
 
-replaceCall :: Server -> C.Tag -> CallState -> IO ()
+replaceCall :: AsyncServer -> C.Tag -> CallState -> IO ()
 replaceCall s t state =
     atomicModifyIORef' (inProgressRequests s) (\a -> (HashMap.insert t state a, ()))
 
 
-deleteCall :: Server -> C.Tag -> IO ()
+deleteCall :: AsyncServer -> C.Tag -> IO ()
 deleteCall s t =
   atomicModifyIORef' (inProgressRequests s) (\a -> (HashMap.delete t a, ()))
 
@@ -238,9 +239,9 @@ startServer grpc conf@ServerConfig{..} =
     C.grpcServerStart server
     forks <- newTVarIO S.empty
     shutdown <- newTVarIO False
-    inProgressRequests <- newIORef mempty
     return $ Server grpc server (Port actualPort) cq ccq ns ss cs bs conf forks
-      shutdown inProgressRequests
+      shutdown
+
 
 stopServer :: Server -> IO ()
 -- TODO: Do method handles need to be freed?
@@ -292,7 +293,7 @@ stopServer Server{ unsafeServer = s, .. } = do
 withServer :: GRPC -> ServerConfig -> (Server -> IO a) -> IO a
 withServer grpc cfg = bracket (startServer grpc cfg) stopServer
 
-startAsyncServer :: GRPC -> ServerConfig -> IO (Server)
+startAsyncServer :: GRPC -> ServerConfig -> IO AsyncServer
 startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \args -> do
   server <- C.grpcServerCreate args C.reserved
   actualPort <- addPort server config
@@ -308,16 +309,63 @@ startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \
   -- to partition them this way, but we get very convenient phantom typing
   -- elsewhere by doing so.
   -- TODO: change order of args so we can eta reduce.
-  ns <- traverse (\nm -> serverRegisterMethodNormal server nm serverEndpoint) methodsToRegisterNormal
-  ss <- traverse (\nm -> serverRegisterMethodServerStreaming server nm serverEndpoint) methodsToRegisterServerStreaming
-  cs <- traverse (\nm -> serverRegisterMethodClientStreaming server nm serverEndpoint) methodsToRegisterClientStreaming
-  bs <- traverse (\nm -> serverRegisterMethodBiDiStreaming server nm serverEndpoint) methodsToRegisterBiDiStreaming
+  let endpoint = serverEndpoint config
+  ns <- traverse (\nm -> serverRegisterMethodNormal server nm endpoint) methodsToRegisterNormal
+  ss <- traverse (\nm -> serverRegisterMethodServerStreaming server nm endpoint) methodsToRegisterServerStreaming
+  cs <- traverse (\nm -> serverRegisterMethodClientStreaming server nm endpoint) methodsToRegisterClientStreaming
+  bs <- traverse (\nm -> serverRegisterMethodBiDiStreaming server nm endpoint) methodsToRegisterBiDiStreaming
 
   C.grpcServerStart server
   forks <- newTVarIO S.empty
   shutdown <- newTVarIO False
   inProgressRequests <- newIORef mempty
-  pure $ Server grpc server (Port actualPort) cq ccq ns ss cs bs conf forks shutdown inProgressRequests
+  pure $ AsyncServer grpc server (Port actualPort) callQueue opsQueue ns ss cs bs config forks shutdown inProgressRequests
+
+stopAsyncServer :: AsyncServer -> IO ()
+-- TODO: Do method handles need to be freed?
+stopAsyncServer AsyncServer{ unsafeServer = s, .. } = do
+  grpcDebug "stopAsyncServer: calling shutdownNotify on shutdown queue."
+  shutdownNotify serverCallQueue
+  C.grpcServerCancelAllCalls s
+  grpcDebug "stopAsyncServer: cleaning up forks."
+  cleanupForks
+  grpcDebug "stopAsyncServer: call grpc_server_destroy."
+  C.grpcServerDestroy s
+  grpcDebug "stopAsyncServer: shutting down queues"
+  -- Queues must be shut down after the server is destroyed.
+  shutdownCQ serverCallQueue
+  shutdownCQ serverOpsQueue
+
+
+  where shutdownCQ scq = do
+          shutdownResult <- shutdownCompletionQueueForNext scq
+          case shutdownResult of
+            Left GRPCIOTimeout -> do grpcDebug "stopServer: Could not stop cleanly. Cancelling all calls."
+                                     C.grpcServerCancelAllCalls s
+            Left _ -> do putStrLn "Warning: completion queue didn't shut down."
+                         putStrLn "Trying to stop server anyway."
+            Right _ -> return ()
+        shutdownNotify scq = do
+          let shutdownTag = C.tag 0
+          serverShutdownAndNotify s scq shutdownTag
+          grpcDebug "called serverShutdownAndNotify; plucking."
+          shutdownEvent <- next scq (Just 30)
+          grpcDebug $ "shutdownNotify: got shutdown event" ++ show shutdownEvent
+          case shutdownEvent of
+            -- This case occurs when we pluck but the queue is already in the
+            -- 'shuttingDown' state, implying we already tried to shut down.
+            Left GRPCIOShutdown -> error "Called stopServer twice!"
+            Left _              -> error "Failed to stop server."
+            Right _             -> return ()
+        cleanupForks = do
+          atomically $ writeTVar serverShuttingDown True
+          liveForks <- readTVarIO outstandingForks
+          grpcDebug $ "Server shutdown: killing threads: " ++ show liveForks
+          mapM_ killThread liveForks
+          -- wait for threads to shut down
+          grpcDebug "Server shutdown: waiting until all threads are dead."
+          atomically $ check . (==0) . S.size =<< readTVar outstandingForks
+          grpcDebug "Server shutdown: All forks cleaned up."
 
 -- | Less precisely-typed registration function used in
 -- 'serverRegisterMethodNormal', 'serverRegisterMethodServerStreaming',
