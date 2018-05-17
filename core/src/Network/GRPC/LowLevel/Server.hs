@@ -293,6 +293,9 @@ stopServer Server{ unsafeServer = s, .. } = do
 withServer :: GRPC -> ServerConfig -> (Server -> IO a) -> IO a
 withServer grpc cfg = bracket (startServer grpc cfg) stopServer
 
+withAsyncServer :: GRPC -> ServerConfig -> (AsyncServer -> IO a) -> IO a
+withAsyncServer grpc cfg = bracket (startAsyncServer grpc cfg) stopAsyncServer
+
 startAsyncServer :: GRPC -> ServerConfig -> IO AsyncServer
 startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \args -> do
   server <- C.grpcServerCreate args C.reserved
