@@ -65,7 +65,7 @@ data Server = Server
   , listeningPort        :: Port
   , serverCQ             :: CompletionQueue
   -- ^ CQ used for receiving new calls.
-  , serverCallCQ               :: CompletionQueue
+  , serverCallCQ         :: CompletionQueue
   -- ^ CQ for running ops on calls. Not used to receive new calls.
   , normalMethods        :: [RegisteredMethod 'Normal]
   , sstreamingMethods    :: [RegisteredMethod 'ServerStreaming]
@@ -74,7 +74,25 @@ data Server = Server
   , serverConfig         :: ServerConfig
   , outstandingForks     :: TVar (S.Set ThreadId)
   , serverShuttingDown   :: TVar Bool
-  , inProgressRequests   :: IORef (HashMap C.Tag (CallState))
+  }
+
+-- | Wraps various gRPC state needed to run a server.
+data AsyncServer = AsyncServer
+  { serverGRPC           :: GRPC
+  , unsafeServer         :: C.Server
+  , listeningPort        :: Port
+  , serverCallQueue      :: CompletionQueue
+  -- ^ CQ used for receiving new calls.
+  , serverOpsQueue       :: CompletionQueue
+  -- ^ CQ for running or reading ops on calls. Not used to receive new calls.
+  , normalMethods        :: [RegisteredMethod 'Normal]
+  , sstreamingMethods    :: [RegisteredMethod 'ServerStreaming]
+  , cstreamingMethods    :: [RegisteredMethod 'ClientStreaming]
+  , bidiStreamingMethods :: [RegisteredMethod 'BiDiStreaming]
+  , serverConfig         :: ServerConfig
+  , outstandingForks     :: TVar (S.Set ThreadId)
+  , serverShuttingDown   :: TVar Bool
+  , inProgressRequests   :: IORef (HashMap C.Tag CallState)
   }
 
 data CallState where
@@ -273,6 +291,33 @@ stopServer Server{ unsafeServer = s, .. } = do
 -- Uses 'bracket' to safely start and stop a server, even if exceptions occur.
 withServer :: GRPC -> ServerConfig -> (Server -> IO a) -> IO a
 withServer grpc cfg = bracket (startServer grpc cfg) stopServer
+
+startAsyncServer :: GRPC -> ServerConfig -> IO (Server)
+startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \args -> do
+  server <- C.grpcServerCreate args C.reserved
+  actualPort <- addPort server config
+
+  when (unPort port > 0 && actualPort /= unPort port) (error $ "Unable to bind port: " ++ show port)
+
+  callQueue <- createCompletionQueueForNext grpc
+  serverRegisterCompletionQueue server callQueue
+  opsQueue <- createCompletionQueueForNext grpc
+  grpcDebug $ "startServer: Server Queue: " ++ show callQueue
+
+  -- Register methods according to their GRPCMethodType kind. It's a bit ugly
+  -- to partition them this way, but we get very convenient phantom typing
+  -- elsewhere by doing so.
+  -- TODO: change order of args so we can eta reduce.
+  ns <- traverse (\nm -> serverRegisterMethodNormal server nm serverEndpoint) methodsToRegisterNormal
+  ss <- traverse (\nm -> serverRegisterMethodServerStreaming server nm serverEndpoint) methodsToRegisterServerStreaming
+  cs <- traverse (\nm -> serverRegisterMethodClientStreaming server nm serverEndpoint) methodsToRegisterClientStreaming
+  bs <- traverse (\nm -> serverRegisterMethodBiDiStreaming server nm serverEndpoint) methodsToRegisterBiDiStreaming
+
+  C.grpcServerStart server
+  forks <- newTVarIO S.empty
+  shutdown <- newTVarIO False
+  inProgressRequests <- newIORef mempty
+  pure $ Server grpc server (Port actualPort) cq ccq ns ss cs bs conf forks shutdown inProgressRequests
 
 -- | Less precisely-typed registration function used in
 -- 'serverRegisterMethodNormal', 'serverRegisterMethodServerStreaming',
