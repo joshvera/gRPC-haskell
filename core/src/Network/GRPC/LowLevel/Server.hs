@@ -218,9 +218,9 @@ startServer grpc conf@ServerConfig{..} =
     actualPort <- addPort server conf
     when (unPort port > 0 && actualPort /= unPort port) $
       error $ "Unable to bind port: " ++ show port
-    cq <- createCompletionQueueForNext grpc
+    cq <- createCompletionQueueForPluck grpc
     serverRegisterCompletionQueue server cq
-    ccq <- createCompletionQueueForNext grpc
+    ccq <- createCompletionQueueForPluck grpc
 
     grpcDebug $ "startServer: server CQ: " ++ show cq
 
@@ -260,7 +260,7 @@ stopServer Server{ unsafeServer = s, .. } = do
 
 
   where shutdownCQ scq = do
-          shutdownResult <- shutdownCompletionQueueForNext scq
+          shutdownResult <- shutdownCompletionQueueForPluck scq
           case shutdownResult of
             Left GRPCIOTimeout -> do grpcDebug "stopServer: Could not stop cleanly. Cancelling all calls."
                                      C.grpcServerCancelAllCalls s
