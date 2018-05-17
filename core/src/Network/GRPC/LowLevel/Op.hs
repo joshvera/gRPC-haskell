@@ -229,13 +229,14 @@ runOpsAsync :: C.Call
             -- ^ 'Call' that this batch is associated with. One call can be
             -- associated with many batches.
             -> CompletionQueue
-            -- ^ Queue on which our tag will be placed once our ops are done
-            -- running.
+            -- ^ Queue to run the operations on.
             -> C.Tag
-            -- ^ The Tag associated with the list of operations.
+            -- ^ The Tag associated with the call..
             -> [Op]
             -- ^ The list of 'Op's to execute.
             -> ((C.OpArray, [OpContext]) -> IO b)
+            -- ^ A function that yields allocated OpArray and OpContexts.
+            -- You are responsible for freeing these with 'teardownOpArrayAndContexts'.
             -> IO (Either GRPCIOError b)
 runOpsAsync call cq tag ops fun =
   let l = length ops in do
