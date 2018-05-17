@@ -15,7 +15,6 @@ import           System.Clock                                   (TimeSpec)
 data ServerCall = ServerCall
   { unsafeSC            :: C.Call
   , callCQ              :: CompletionQueue
-  , callTag             :: C.Tag
   , metadata            :: MetadataMap
   , callDeadline        :: TimeSpec
   , callMethod          :: Reg.MethodName

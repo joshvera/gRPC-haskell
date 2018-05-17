@@ -54,7 +54,6 @@ import qualified Network.GRPC.Unsafe.Security          as C
 import qualified Data.HashMap.Strict as HashMap
 import Data.HashMap.Strict (HashMap)
 import qualified Network.GRPC.LowLevel.Call.Unregistered  as U
-import Data.Maybe (isNothing, isJust)
 import Foreign.Ptr (Ptr)
 import qualified Network.GRPC.Unsafe.Metadata  as C
 import Data.IORef
