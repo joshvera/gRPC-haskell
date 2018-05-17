@@ -24,7 +24,7 @@ import           System.Timeout                                 (timeout)
 -- 1. Set the shuttingDown 'TVar' to 'True'. When this is set, no new pluck
 --    calls will be allowed to start.
 -- 2. Wait until no threads are plucking, as counted by 'currentPluckers'.
--- This logic can be seen in 'next' and 'shutdownCompletionQueue'.
+-- This logic can be seen in 'pluck' and 'shutdownCompletionQueue'.
 
 -- NOTE: There is one more possible race condition: pushing work onto the queue
 -- after we begin to shut down.
@@ -108,21 +108,21 @@ pluck cq@CompletionQueue{..} tag mwait = do
   grpcDebug $ "pluck: called with tag=" ++ show tag ++ ",mwait=" ++ show mwait
   withPermission Pluck cq $ pluck' cq tag mwait
 
--- Variant of next' which assumes pluck permission has been granted.
+-- Variant of 'pluck' which assumes pluck permission has been granted.
 pluck' :: CompletionQueue
        -> C.Tag
        -> Maybe TimeoutSeconds
        -> IO (Either GRPCIOError ())
 pluck' CompletionQueue{..} tag mwait =
   maybe C.withInfiniteDeadline C.withDeadlineSeconds mwait $ \dead -> do
-    grpcDebug $ "next: blocking on grpc_completion_queue_pluck for tag=" ++ show tag
+    grpcDebug $ "pluck: blocking on grpc_completion_queue_pluck for tag=" ++ show tag
     ev <- C.grpcCompletionQueuePluck unsafeCQ tag dead C.reserved
-    grpcDebug $ "next finished: " ++ show ev
+    grpcDebug $ "pluck finished: " ++ show ev
     return $ if isEventSuccessful ev then Right () else eventToError ev
 
 next :: CompletionQueue
-       -> Maybe TimeoutSeconds
-       -> IO (Either GRPCIOError C.Event)
+     -> Maybe TimeoutSeconds
+     -> IO (Either GRPCIOError C.Event)
 next CompletionQueue{..} mwait =
   maybe C.withInfiniteDeadline C.withDeadlineSeconds mwait $ \dead -> do
     grpcDebug $ "next: blocking on grpc_completion_queue_next"
@@ -180,7 +180,7 @@ shutdownCompletionQueueForPluck scq@CompletionQueue{..} = do
           grpcDebug "drainLoop: before pluck() call"
           tag <- newTag scq
           ev <- C.withDeadlineSeconds 1 $ \deadline ->
-                  C.grpcCompletionQueuePluck unsafeCQ deadline C.reserved
+                  C.grpcCompletionQueuePluck unsafeCQ tag deadline C.reserved
           grpcDebug $ "drainLoop: pluck() call got " ++ show ev
           case C.eventCompletionType ev of
             C.QueueShutdown -> return (Right ())
