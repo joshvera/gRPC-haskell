@@ -187,6 +187,21 @@ loopWError i o@ServerOptions{..} f = do
    f >>= handleCallError optLogger
    loopWError (i + 1) o f
 
+-- TODO: options for setting initial/trailing metadata
+handleLoop :: Server
+           -> ServerOptions
+           -> (Handler a, RegisteredMethod a)
+           -> IO ()
+handleLoop s o (UnaryHandler _ f, rm) =
+  loopWError 0 o $ serverHandleNormalCall s rm mempty $ convertServerHandler f
+handleLoop s o (ClientStreamHandler _ f, rm) =
+  loopWError 0 o $ serverReader s rm mempty $ convertServerReaderHandler f
+handleLoop s o (ServerStreamHandler _ f, rm) =
+  loopWError 0 o $ serverWriter s rm mempty $ convertServerWriterHandler f
+handleLoop s o (BiDiStreamHandler _ f, rm) =
+  loopWError 0 o $ serverRW s rm mempty $ convertServerRWHandler f
+
+
 data ServerOptions = ServerOptions
   { optNormalHandlers       :: [Handler 'Normal]
     -- ^ Handlers for unary (non-streaming) calls.
@@ -229,3 +244,48 @@ defaultOptions = ServerOptions
   , optSSLConfig            = Nothing
   , optLogger               = hPutStrLn stderr
   }
+
+serverLoop :: ServerOptions -> IO ()
+serverLoop _opts = fail "Registered method-based serverLoop NYI"
+{-
+  withGRPC $ \grpc ->
+    withServer grpc (mkConfig opts) $ \server -> do
+      let rmsN = zip (optNormalHandlers opts) $ normalMethods server
+      let rmsCS = zip (optClientStreamHandlers opts) $ cstreamingMethods server
+      let rmsSS = zip (optServerStreamHandlers opts) $ sstreamingMethods server
+      let rmsB = zip (optBiDiStreamHandlers opts) $ bidiStreamingMethods server
+      --TODO: Perhaps assert that no methods disappeared after registration.
+      let loop :: forall a. (Handler a, RegisteredMethod a) -> IO ()
+          loop = handleLoop server
+      asyncsN <- mapM async $ map loop rmsN
+      asyncsCS <- mapM async $ map loop rmsCS
+      asyncsSS <- mapM async $ map loop rmsSS
+      asyncsB <- mapM async $ map loop rmsB
+      asyncUnk <- async $ loopWError 0 $ unknownHandler server
+      waitAnyCancel $ asyncUnk : asyncsN ++ asyncsCS ++ asyncsSS ++ asyncsB
+      return ()
+  where
+    mkConfig ServerOptions{..} =
+      ServerConfig
+        {  host = "localhost"
+         , port = optServerPort
+         , methodsToRegisterNormal = map handlerMethodName optNormalHandlers
+         , methodsToRegisterClientStreaming =
+             map handlerMethodName optClientStreamHandlers
+         , methodsToRegisterServerStreaming =
+             map handlerMethodName optServerStreamHandlers
+         , methodsToRegisterBiDiStreaming =
+             map handlerMethodName optBiDiStreamHandlers
+         , serverArgs =
+             ([CompressionAlgArg GrpcCompressDeflate | optUseCompression]
+              ++
+              [UserAgentPrefix optUserAgentPrefix
+               , UserAgentSuffix optUserAgentSuffix])
+        }
+    unknownHandler s =
+      --TODO: is this working?
+      U.serverHandleNormalCall s mempty $ \call _ -> do
+        logMsg $ "Requested unknown endpoint: " ++ show (U.callMethod call)
+        return ("", mempty, StatusNotFound,
+                StatusDetails "Unknown method")
+-}

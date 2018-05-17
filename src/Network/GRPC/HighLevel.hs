@@ -14,7 +14,7 @@ module Network.GRPC.HighLevel (
 , Handler(..)
 , ServerOptions(..)
 , defaultOptions
--- , serverLoop
+, serverLoop
 , ServerCall(..)
 , serverCallCancel
 , serverCallIsExpired
