@@ -45,8 +45,8 @@ lowLevelTests = testGroup "Unit tests of low-level Haskell library"
   , testClientCall
   , testClientTimeoutNoServer
   , testServerCreateDestroy
-  -- , testMixRegisteredUnregistered
-  -- , testPayload
+  , testMixRegisteredUnregistered
+  , testPayload
   , testSSL
   , testAuthMetadataTransfer
   , testServerAuthProcessorCancel
