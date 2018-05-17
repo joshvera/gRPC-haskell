@@ -62,7 +62,6 @@ processCallData server callState event allHandlers = case callState of
         serverCall <- U.ServerCall
           <$> peek callPtr
           <*> return (serverCallCQ server)
-          <*> return tag
           <*> C.getAllMetadataArray metadata
           <*> (C.timeSpec <$> C.callDetailsGetDeadline callDetails)
           <*> (MethodName <$> C.callDetailsGetMethod   callDetails)
@@ -94,9 +93,9 @@ processCallData server callState event allHandlers = case callState of
 
         (rsp, trailMeta, st, ds) <- f serverCall body
         let operations = [ OpRecvCloseOnServer , OpSendMessage rsp, OpSendStatusFromServer trailMeta st ds ]
-        runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) (U.callTag serverCall) operations $ \(array, contexts) -> do
+        runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array, contexts) -> do
           let state = AcknowledgeResponse serverCall pointers tag array contexts
-          replaceCall server (U.callTag serverCall) state
+          replaceCall server tag state
           pure state
     where
       findHandler sc = find ((== U.callMethod sc) . handlerMethodName)
