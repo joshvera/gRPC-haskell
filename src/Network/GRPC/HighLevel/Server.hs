@@ -8,7 +8,6 @@
 
 module Network.GRPC.HighLevel.Server where
 
-import Network.GRPC.LowLevel.Server (ServerHandler)
 import qualified Control.Exception                         as CE
 import           Control.Monad
 import           Data.ByteString                           (ByteString)
@@ -200,7 +199,6 @@ handleLoop s o (ServerStreamHandler _ f, rm) =
   loopWError 0 o $ serverWriter s rm mempty $ convertServerWriterHandler f
 handleLoop s o (BiDiStreamHandler _ f, rm) =
   loopWError 0 o $ serverRW s rm mempty $ convertServerRWHandler f
-
 
 data ServerOptions = ServerOptions
   { optNormalHandlers       :: [Handler 'Normal]
