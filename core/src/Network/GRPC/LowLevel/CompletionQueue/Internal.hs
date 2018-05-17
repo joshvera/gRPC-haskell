@@ -106,17 +106,17 @@ pluck :: CompletionQueue -> C.Tag -> Maybe TimeoutSeconds
          -> IO (Either GRPCIOError ())
 pluck cq@CompletionQueue{..} tag mwait = do
   grpcDebug $ "pluck: called with tag=" ++ show tag ++ ",mwait=" ++ show mwait
-  withPermission Pluck cq $ next' cq tag mwait
+  withPermission Pluck cq $ pluck' cq tag mwait
 
 -- Variant of next' which assumes pluck permission has been granted.
-next' :: CompletionQueue
+pluck' :: CompletionQueue
        -> C.Tag
        -> Maybe TimeoutSeconds
        -> IO (Either GRPCIOError ())
-next' CompletionQueue{..} tag mwait =
+pluck' CompletionQueue{..} tag mwait =
   maybe C.withInfiniteDeadline C.withDeadlineSeconds mwait $ \dead -> do
     grpcDebug $ "next: blocking on grpc_completion_queue_pluck for tag=" ++ show tag
-    ev <- C.grpcCompletionQueueNext unsafeCQ dead C.reserved
+    ev <- C.grpcCompletionQueuePluck unsafeCQ tag dead C.reserved
     grpcDebug $ "next finished: " ++ show ev
     return $ if isEventSuccessful ev then Right () else eventToError ev
 

@@ -149,7 +149,7 @@ serverRequestCall rm s scq ccq =
       runExceptT $ case ce of
         C.CallOk -> do
           ExceptT $ do
-            r <- next' scq tag Nothing
+            r <- pluck' scq tag Nothing
             dbug $ "next' finished:" ++ show r
             return r
           lift $
