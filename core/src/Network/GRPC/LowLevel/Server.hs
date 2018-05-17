@@ -87,9 +87,9 @@ type ServerHandler a b = ServerCall a -> IO (b, MetadataMap, C.StatusCode, C.Sta
 --   Finish :: CallState' 'Finished 'Nada
 data CallState where
   Listen :: CallState
-  StartRequest :: Ptr C.Call -> C.MetadataArray -> C.CallDetails -> C.Tag -> CallState
-  ReceivePayload :: U.ServerCall -> C.Tag -> C.OpArray -> [OpContext] -> CallState
-  AcknowledgeResponse :: U.ServerCall -> C.Tag -> C.OpArray -> [OpContext] -> CallState
+  StartRequest :: (Ptr C.Call, Ptr C.MetadataArray, C.CallDetails) -> C.MetadataArray -> C.Tag -> CallState
+  ReceivePayload :: U.ServerCall -> (Ptr C.Call, Ptr C.MetadataArray, C.CallDetails) -> C.Tag -> C.OpArray -> [OpContext] -> CallState
+  AcknowledgeResponse :: U.ServerCall -> (Ptr C.Call, Ptr C.MetadataArray, C.CallDetails) -> C.Tag -> C.OpArray -> [OpContext] -> CallState
   Finish :: CallState
 
 lookupCall :: Server -> C.Tag -> IO (Maybe (CallState))

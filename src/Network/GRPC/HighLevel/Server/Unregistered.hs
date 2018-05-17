@@ -44,28 +44,18 @@ processCallData server callState event allHandlers = case callState of
     metadata  <- peek metadataPtr
     callDetails <- C.createCallDetails
     callError <- C.grpcServerRequestCall (unsafeServer server) callPtr callDetails metadata (unsafeCQ . serverCallCQ $ server) (unsafeCQ . serverCQ $ server) tag'
-    -- C.free metadataPtr
+
     case callError of
       C.CallOk -> do
-        let state = StartRequest callPtr metadata callDetails tag'
+        let state = StartRequest (callPtr, metadataPtr, callDetails) metadata tag'
         insertCall server tag' state
         pure (Right state)
       other -> pure (Left (GRPCIOCallError other))
 
-  (StartRequest callPtr metadata callDetails tag) -> do
+  (StartRequest pointers@(callPtr, _, callDetails) metadata tag) -> do
     grpcDebug ("Processing tag" ++ show tag)
     nextCall <- processCallData server Listen Nothing allHandlers
-    serverCall <- U.ServerCall
-      <$> peek callPtr
-      <*> return (serverCallCQ server)
-      <*> return tag
-      <*> C.getAllMetadataArray metadata
-      <*> (C.timeSpec <$> C.callDetailsGetDeadline callDetails)
-      <*> (MethodName <$> C.callDetailsGetMethod   callDetails)
-      <*> (Host       <$> C.callDetailsGetHost     callDetails)
-    -- C.free callPtr
-    -- C.metadataArrayDestroy metadata
-    -- C.destroyCallDetails callDetails
+
     case nextCall of
       Right callState -> do
         serverCall <- U.ServerCall
@@ -83,12 +73,12 @@ processCallData server callState event allHandlers = case callState of
         grpcDebug "Send initial metadata"
         runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag [ OpSendInitialMetadata (U.metadata serverCall), OpRecvMessage ] $ \(array, contexts) -> do
           grpcDebug "Creating a message result"
-          let state = ReceivePayload serverCall tag array contexts
+          let state = ReceivePayload serverCall pointers tag array contexts
           replaceCall server tag state
           grpcDebug "Set a message result"
           pure state
       Left other -> pure (Left other)
-  (ReceivePayload serverCall tag array contexts) -> do
+  (ReceivePayload serverCall pointers tag array contexts) -> do
     grpcDebug ("Received payload with tag" ++ show tag)
     payload <- fmap (Right . catMaybes) $ mapM resultFromOpContext contexts
     grpcDebug "Received MessageResult"
@@ -107,14 +97,19 @@ processCallData server callState event allHandlers = case callState of
         (rsp, trailMeta, st, ds) <- f serverCall body
         let operations = [ OpRecvCloseOnServer , OpSendMessage rsp, OpSendStatusFromServer trailMeta st ds ]
         runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) (U.callTag serverCall) operations $ \(array, contexts) -> do
-          let state = AcknowledgeResponse serverCall tag array contexts
+          let state = AcknowledgeResponse serverCall pointers tag array contexts
           replaceCall server (U.callTag serverCall) state
           pure state
     where
       findHandler sc = find ((== U.callMethod sc) . handlerMethodName)
-  (AcknowledgeResponse serverCall tag array contexts) -> do
+  (AcknowledgeResponse serverCall (callPtr, metadataPtr, callDetails) tag array contexts) -> do
+
     teardownOpArrayAndContexts array contexts
+    C.metadataArrayDestroy metadataPtr 
+    C.destroyCallDetails callDetails
+    C.free callPtr
     deleteCall server tag
+
     pure (Right Finish)
 
 dispatchLoop :: Server
