@@ -37,6 +37,10 @@ data ServerResponse (streamType :: GRPCMethodType) response where
   ServerBiDiResponse :: MetadataMap -> StatusCode -> StatusDetails
                      -> ServerResponse 'BiDiStreaming response
 
+type ServerHandler a b =
+  ServerCall a
+  -> IO (b, MetadataMap, StatusCode, StatusDetails)
+
 convertGeneratedServerHandler ::
   (ServerRequest 'Normal request response -> IO (ServerResponse 'Normal response))
   -> ServerHandler request response

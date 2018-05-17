@@ -77,8 +77,6 @@ data Server = Server
   , inProgressRequests   :: IORef (HashMap C.Tag (CallState))
   }
 
-type ServerHandler a b = ServerCall a -> IO (b, MetadataMap, C.StatusCode, C.StatusDetails)
-
 data CallState where
   Listen :: CallState
   StartRequest :: (Ptr C.Call, Ptr C.MetadataArray, C.CallDetails) -> C.MetadataArray -> C.Tag -> CallState

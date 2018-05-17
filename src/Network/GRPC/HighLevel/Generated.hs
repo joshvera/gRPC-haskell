@@ -38,7 +38,6 @@ module Network.GRPC.HighLevel.Generated (
 )
 where
 
-import           Network.GRPC.LowLevel.Server (ServerHandler)
 import           Network.GRPC.HighLevel.Server
 import           Network.GRPC.HighLevel.Client
 import           Network.GRPC.LowLevel
