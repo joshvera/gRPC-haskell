@@ -8,34 +8,25 @@
 
 module Network.GRPC.HighLevel.Server.Unregistered where
 
-import           Control.Arrow
 import           Control.Concurrent.Async                  (async, wait, concurrently_)
-import qualified Control.Exception                         as CE
 import           Control.Monad
 import           Data.Foldable                             (find)
 import           Network.GRPC.HighLevel.Server
 import           Network.GRPC.LowLevel
 import           Network.GRPC.LowLevel.GRPC (grpcDebug)
-import Network.GRPC.LowLevel.Call   (mgdPtr)
 import qualified Network.GRPC.LowLevel.Call.Unregistered   as U
-import qualified Network.GRPC.LowLevel.Server.Unregistered as U
 import Network.GRPC.LowLevel.Server
-import           Proto3.Suite.Class
 import qualified Network.GRPC.Unsafe                            as C
 import qualified Network.GRPC.Unsafe.Metadata                   as C
 import qualified Network.GRPC.Unsafe.Time                       as C
-import           Control.Monad.Managed
 import           Foreign.Storable                               (peek)
 import           Network.GRPC.LowLevel.CompletionQueue.Internal (newTag, CompletionQueue(..), next)
-import           Network.GRPC.LowLevel.Op (OpContext, runOpsAsync, resultFromOpContext, teardownOpArrayAndContexts)
-import qualified Network.GRPC.Unsafe.Op                         as C
+import           Network.GRPC.LowLevel.Op (runOpsAsync, resultFromOpContext, teardownOpArrayAndContexts)
 import Data.Maybe (catMaybes)
-import Data.ByteString (ByteString)
-import Foreign.Ptr (nullPtr)
 import qualified Foreign.Marshal.Alloc as C
 
 processCallData :: Server -> CallState -> Maybe C.Event -> [Handler 'Normal] -> IO (Either GRPCIOError (CallState))
-processCallData server callState event allHandlers = case callState of
+processCallData server callState _event allHandlers = case callState of
   Listen -> do
     tag' <- newTag (serverCQ server)
     grpcDebug ("Creating tag" ++ show tag')
@@ -55,17 +46,6 @@ processCallData server callState event allHandlers = case callState of
   (StartRequest callPtr metadata callDetails tag) -> do
     grpcDebug ("Processing tag" ++ show tag)
     nextCall <- processCallData server Listen Nothing allHandlers
-    serverCall <- U.ServerCall
-      <$> peek callPtr
-      <*> return (serverCallCQ server)
-      <*> return tag
-      <*> C.getAllMetadataArray metadata
-      <*> (C.timeSpec <$> C.callDetailsGetDeadline callDetails)
-      <*> (MethodName <$> C.callDetailsGetMethod   callDetails)
-      <*> (Host       <$> C.callDetailsGetHost     callDetails)
-    -- C.free callPtr
-    -- C.metadataArrayDestroy metadata
-    -- C.destroyCallDetails callDetails
     case nextCall of
       Right callState -> do
         serverCall <- U.ServerCall
@@ -76,9 +56,6 @@ processCallData server callState event allHandlers = case callState of
           <*> (C.timeSpec <$> C.callDetailsGetDeadline callDetails)
           <*> (MethodName <$> C.callDetailsGetMethod   callDetails)
           <*> (Host       <$> C.callDetailsGetHost     callDetails)
-        -- C.free callPtr
-        -- C.metadataArrayDestroy metadata
-        -- C.destroyCallDetails callDetails
 
         grpcDebug "Send initial metadata"
         runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag [ OpSendInitialMetadata (U.metadata serverCall), OpRecvMessage ] $ \(array, contexts) -> do
@@ -112,7 +89,7 @@ processCallData server callState event allHandlers = case callState of
           pure state
     where
       findHandler sc = find ((== U.callMethod sc) . handlerMethodName)
-  (AcknowledgeResponse serverCall tag array contexts) -> do
+  (AcknowledgeResponse _serverCall tag array contexts) -> do
     teardownOpArrayAndContexts array contexts
     deleteCall server tag
     pure (Right Finish)
@@ -125,7 +102,7 @@ dispatchLoop :: Server
              -> [Handler 'ServerStreaming]
              -> [Handler 'BiDiStreaming]
              -> IO ()
-dispatchLoop s logger md hN hC hS hB = do
+dispatchLoop s _logger _md hN hC hS hB = do
   initialCallData <- processCallData s Listen Nothing hN-- C.grpcServerRequestCall >> returns (Process ServerCall)
   case initialCallData of
 
@@ -152,10 +129,6 @@ dispatchLoop s logger md hN hC hS hB = do
             Left err -> error ("Failed to fetch event" ++ show err)
 
     Left err -> error ("failed to create initial call data" ++ show err)
-
-  where
-    allHandlers = map AnyHandler hN ++ map AnyHandler hC
-                  ++ map AnyHandler hS ++ map AnyHandler hB
 
 
 

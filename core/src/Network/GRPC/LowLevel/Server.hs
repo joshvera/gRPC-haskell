@@ -37,13 +37,11 @@ import qualified Data.ByteString                       as B
 import qualified Data.Set as S
 import           Network.GRPC.LowLevel.Call
 import           Network.GRPC.LowLevel.CompletionQueue (CompletionQueue,
-                                                        createCompletionQueueForPluck,
                                                         createCompletionQueueForNext,
                                                         pluck,
                                                         serverRegisterCompletionQueue,
                                                         serverRequestCall,
                                                         serverShutdownAndNotify,
-                                                        shutdownCompletionQueueForPluck,
                                                         shutdownCompletionQueueForNext)
 import           Network.GRPC.LowLevel.GRPC
 import           Network.GRPC.LowLevel.Op

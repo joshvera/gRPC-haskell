@@ -178,7 +178,7 @@ shutdownCompletionQueueForPluck scq@CompletionQueue{..} = do
   where drainLoop :: IO (Either GRPCIOError ())
         drainLoop = do
           grpcDebug "drainLoop: before pluck() call"
-          tag <- newTag scq
+          void $ newTag scq
           ev <- C.withDeadlineSeconds 1 $ \deadline ->
                   C.grpcCompletionQueueNext unsafeCQ deadline C.reserved
           grpcDebug $ "drainLoop: pluck() call got " ++ show ev
@@ -188,7 +188,7 @@ shutdownCompletionQueueForPluck scq@CompletionQueue{..} = do
             C.OpComplete -> drainLoop
 
 shutdownCompletionQueueForNext :: CompletionQueue -> IO (Either GRPCIOError ())
-shutdownCompletionQueueForNext scq@CompletionQueue{..} = do
+shutdownCompletionQueueForNext CompletionQueue{..} = do
   atomically $ writeTVar shuttingDown True
   -- TODO: Probably don't need to check currentPushers and currentPluckers here.
   atomically $ do

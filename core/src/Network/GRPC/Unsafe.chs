@@ -167,10 +167,10 @@ instance Storable QueueAttributes where
   peek p = QueueAttributes <$> liftM fromIntegral ({#get grpc_completion_queue_attributes->version#} p)
                  <*> liftM (toEnum . fromIntegral) ({#get grpc_completion_queue_attributes->cq_completion_type#} p)
                  <*> liftM (toEnum . fromIntegral) ({#get grpc_completion_queue_attributes->cq_polling_type#} p)
-  poke p (QueueAttributes v completionType pollingType) = do
+  poke p (QueueAttributes v ct pType) = do
     {#set grpc_completion_queue_attributes.version#} p $ fromIntegral $ fromEnum v
-    {#set grpc_completion_queue_attributes.cq_completion_type#} p $ fromIntegral $ fromEnum completionType
-    {#set grpc_completion_queue_attributes.cq_polling_type#} p $ fromIntegral $ fromEnum pollingType
+    {#set grpc_completion_queue_attributes.cq_completion_type#} p $ fromIntegral $ fromEnum ct
+    {#set grpc_completion_queue_attributes.cq_polling_type#} p $ fromIntegral $ fromEnum pType
 
 {#fun grpc_completion_queue_factory_lookup as ^ {`QueueAttributesPtr'} -> `CompletionQueueFactory'#}
 
