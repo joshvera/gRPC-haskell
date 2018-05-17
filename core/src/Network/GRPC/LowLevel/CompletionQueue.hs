@@ -150,7 +150,7 @@ serverRequestCall rm s scq ccq =
         C.CallOk -> do
           ExceptT $ do
             r <- pluck' scq tag Nothing
-            dbug $ "next' finished:" ++ show r
+            dbug $ "pluck' finished:" ++ show r
             return r
           lift $
             ServerCall
