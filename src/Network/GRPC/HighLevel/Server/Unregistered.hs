@@ -146,12 +146,6 @@ dispatchLoop s logger md hN hC hS hB = do
 
     Left err -> error ("failed to create initial call data" ++ show err)
 
-  where
-    allHandlers = map AnyHandler hN ++ map AnyHandler hC
-                  ++ map AnyHandler hS ++ map AnyHandler hB
-
-
-
 serverLoop :: ServerOptions -> IO ()
 serverLoop ServerOptions{..} = do
   -- We run the loop in a new thread so that we can kill the serverLoop thread.
