@@ -80,12 +80,6 @@ data Server = Server
 
 type ServerHandler a b = ServerCall a -> IO (b, MetadataMap, C.StatusCode, C.StatusDetails)
 
--- data CallState' from to where
---   Listen :: CallState' 'Nada 'Listening
---   StartRequest :: CallState' 'Listening 'WaitingForPayload
---   ReceivePayload :: CallState' 'WaitingForPayload 'SentResponse
---   AcknowledgeResponse :: CallState' 'SentResponse 'Finished
---   Finish :: CallState' 'Finished 'Nada
 data CallState where
   Listen :: CallState
   StartRequest :: (Ptr C.Call, Ptr C.MetadataArray, C.CallDetails) -> C.MetadataArray -> C.Tag -> CallState
