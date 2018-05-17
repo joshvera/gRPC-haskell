@@ -20,7 +20,6 @@ import           Network.GRPC.LowLevel.Server                       (Server (..)
                                                                      serverWriter',
                                                                      serverRW')
 import qualified Network.GRPC.Unsafe.Op                             as C
-import qualified Network.GRPC.Unsafe                             as C
 
 serverCreateCall :: Server
                  -> IO (Either GRPCIOError ServerCall)
@@ -28,10 +27,9 @@ serverCreateCall Server{..} =
   serverRequestCall unsafeServer serverCQ serverCallCQ
 
 withServerCall :: Server
-               -> C.Tag
                -> (ServerCall -> IO (Either GRPCIOError a))
                -> IO (Either GRPCIOError a)
-withServerCall s tag f =
+withServerCall s f =
   serverCreateCall s >>= \case
     Left e  -> return (Left e)
     Right c -> f c `finally` do
@@ -71,6 +69,14 @@ type ServerHandler
   =  ServerCall
   -> ByteString
   -> IO (ByteString, MetadataMap, C.StatusCode, StatusDetails)
+
+-- | Handle one unregistered call.
+serverHandleNormalCall :: Server
+                       -> MetadataMap -- ^ Initial server metadata.
+                       -> ServerHandler
+                       -> IO (Either GRPCIOError ())
+serverHandleNormalCall s initMeta f =
+  withServerCall s $ \c -> serverHandleNormalCall' s c initMeta f
 
 serverHandleNormalCall' :: Server
                         -> ServerCall
