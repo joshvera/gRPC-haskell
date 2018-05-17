@@ -41,6 +41,7 @@ GRPC
          bidiStreamingMethods)
 , ServerCall(payload, metadata)
 , withServer
+, serverHandleNormalCall
 , ServerHandlerLL
 , withServerCall
 , serverCallCancel

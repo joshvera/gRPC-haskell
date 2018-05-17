@@ -491,3 +491,21 @@ serverRW' _ sc@ServerCall{ unsafeSC = c, callCQ = ccq } initMeta f =
 type ServerHandlerLL
   =  ServerCall (MethodPayload 'Normal)
   -> IO (ByteString, MetadataMap, C.StatusCode, StatusDetails)
+
+-- | Wait for and then handle a normal (non-streaming) call.
+serverHandleNormalCall :: Server
+                       -> RegisteredMethod 'Normal
+                       -> MetadataMap
+                       -- ^ Initial server metadata
+                       -> ServerHandlerLL
+                       -> IO (Either GRPCIOError ())
+serverHandleNormalCall s rm initMeta f =
+  withServerCall s rm go
+  where
+    go sc@ServerCall{ unsafeSC = c, callCQ = ccq } = do
+      (rsp, trailMeta, st, ds) <- f sc
+      void <$> runOps c ccq [ OpSendInitialMetadata initMeta
+                            , OpRecvCloseOnServer
+                            , OpSendMessage rsp
+                            , OpSendStatusFromServer trailMeta st ds
+                            ]
