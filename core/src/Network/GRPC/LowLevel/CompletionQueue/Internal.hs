@@ -180,7 +180,7 @@ shutdownCompletionQueueForPluck scq@CompletionQueue{..} = do
           grpcDebug "drainLoop: before pluck() call"
           tag <- newTag scq
           ev <- C.withDeadlineSeconds 1 $ \deadline ->
-                  C.grpcCompletionQueueNext unsafeCQ deadline C.reserved
+                  C.grpcCompletionQueuePluck unsafeCQ deadline C.reserved
           grpcDebug $ "drainLoop: pluck() call got " ++ show ev
           case C.eventCompletionType ev of
             C.QueueShutdown -> return (Right ())
