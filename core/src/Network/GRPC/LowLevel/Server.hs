@@ -57,6 +57,7 @@ import qualified Network.GRPC.LowLevel.Call.Unregistered  as U
 import Data.Maybe (isNothing, isJust)
 import Foreign.Ptr (Ptr)
 import qualified Network.GRPC.Unsafe.Metadata  as C
+import Data.IORef
 
 -- | Wraps various gRPC state needed to run a server.
 data Server = Server
@@ -74,7 +75,7 @@ data Server = Server
   , serverConfig         :: ServerConfig
   , outstandingForks     :: TVar (S.Set ThreadId)
   , serverShuttingDown   :: TVar Bool
-  , inProgressRequests   :: TVar (HashMap C.Tag (CallState))
+  , inProgressRequests   :: IORef (HashMap C.Tag (CallState))
   }
 
 type ServerHandler a b = ServerCall a -> IO (b, MetadataMap, C.StatusCode, C.StatusDetails)
@@ -93,31 +94,22 @@ data CallState where
   Finish :: CallState
 
 lookupCall :: Server -> C.Tag -> IO (Maybe (CallState))
-lookupCall s t = atomically $ HashMap.lookup t <$> readTVar (inProgressRequests s)
+lookupCall s t = HashMap.lookup t <$> readIORef (inProgressRequests s)
 
 
 insertCall :: Server -> C.Tag -> CallState -> IO ()
-insertCall s t state = do
-  wasPresent <- atomically $ do
-    mEntry <- HashMap.lookup t <$> readTVar (inProgressRequests s)
-    mEntry <$ modifyTVar' (inProgressRequests s) (HashMap.insert t state)
-  when (isJust wasPresent) (grpcDebug ("Warning: overwriting key " ++ show t))
+insertCall s t state =
+  atomicModifyIORef' (inProgressRequests s) (\a -> (HashMap.insert t state a, ()))
 
 
 replaceCall :: Server -> C.Tag -> CallState -> IO ()
-replaceCall s t state = do
-  wasPresent <- atomically $ do
-    mEntry <- HashMap.lookup t <$> readTVar (inProgressRequests s)
-    mEntry <$ modifyTVar' (inProgressRequests s) (HashMap.insert t state)
-  when (isNothing wasPresent) (grpcDebug ("Warning: replacing non-present key " ++ show t))
+replaceCall s t state =
+    atomicModifyIORef' (inProgressRequests s) (\a -> (HashMap.insert t state a, ()))
 
 
 deleteCall :: Server -> C.Tag -> IO ()
-deleteCall s t = do
-  wasPresent <- atomically $ do
-    mEntry <- HashMap.lookup t <$> readTVar (inProgressRequests s)
-    mEntry <$ modifyTVar' (inProgressRequests s) (HashMap.delete t)
-  when (isNothing wasPresent) (grpcDebug ("Warning: deleting non-present key " ++ show t))
+deleteCall s t =
+  atomicModifyIORef' (inProgressRequests s) (\a -> (HashMap.delete t a, ()))
 
 -- TODO: should we make a forkGRPC function instead? I am not sure if it would
 -- be safe to let the call handlers threads keep running after the server stops,
@@ -237,7 +229,7 @@ startServer grpc conf@ServerConfig{..} =
     C.grpcServerStart server
     forks <- newTVarIO S.empty
     shutdown <- newTVarIO False
-    inProgressRequests <- newTVarIO mempty
+    inProgressRequests <- newIORef mempty
     return $ Server grpc server (Port actualPort) cq ccq ns ss cs bs conf forks
       shutdown inProgressRequests
 
