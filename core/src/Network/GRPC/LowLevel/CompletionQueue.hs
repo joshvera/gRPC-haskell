@@ -72,12 +72,10 @@ withCompletionQueueForPluck grpc = bracket (createCompletionQueueForPluck grpc)
 createCompletionQueueForNext :: GRPC -> IO CompletionQueue
 createCompletionQueueForNext _ = do
   unsafeCQ <- C.grpcCompletionQueueCreateForNext C.reserved
-  currentPluckers <- newTVarIO 0
-  currentPushers <- newTVarIO 0
   shuttingDown <- newTVarIO False
   nextTag <- newIORef minBound
   -- TODO A next completion queue should have no need for plucker or pusher TVars.
-  return CompletionQueue{..}
+  return NextQueue{..}
 
 createCompletionQueueForPluck :: GRPC -> IO CompletionQueue
 createCompletionQueueForPluck _ = do
@@ -195,8 +193,8 @@ serverRequestCall rm s scq ccq =
 -- | Register the server's completion queue. Must be done before the server is
 -- started.
 serverRegisterCompletionQueue :: C.Server -> CompletionQueue -> IO ()
-serverRegisterCompletionQueue server CompletionQueue{..} =
-  C.grpcServerRegisterCompletionQueue server unsafeCQ C.reserved
+serverRegisterCompletionQueue server q =
+  C.grpcServerRegisterCompletionQueue server (unsafeCQ q) C.reserved
 
 -- | Kills all pending requests for incoming RPC calls, shuts down listening on the port for incoming channels,
 -- then iterates through all channels on the server and sends a shutdown message to the clients.
@@ -207,5 +205,5 @@ serverRegisterCompletionQueue server CompletionQueue{..} =
 --  connection is NOT closed until the server is done with all those calls.
 -- * Once, there are no more calls in progress, the channel is closed.
 serverShutdownAndNotify :: C.Server -> CompletionQueue -> C.Tag -> IO ()
-serverShutdownAndNotify server CompletionQueue{..} tag =
-  C.grpcServerShutdownAndNotify server unsafeCQ tag
+serverShutdownAndNotify server q tag =
+  C.grpcServerShutdownAndNotify server (unsafeCQ q) tag

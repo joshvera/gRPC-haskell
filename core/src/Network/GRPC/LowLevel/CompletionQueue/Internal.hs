@@ -61,6 +61,10 @@ data CompletionQueue = CompletionQueue {unsafeCQ        :: C.CompletionQueue,
                                         -- ^ Used to supply unique tags for work
                                         -- items pushed onto the queue.
                                        }
+                       | NextQueue { unsafeCQ :: C.CompletionQueue
+                                    , shuttingDown :: TVar Bool
+                                    , nextTag :: IORef Int
+                                    }
 
 instance Show CompletionQueue where show = show . unsafeCQ
 
@@ -72,8 +76,8 @@ data CQOpType = Push | Pluck deriving (Show, Eq, Enum)
 -- This will eventually wrap around after reaching @maxBound :: Int@, but from a
 -- practical perspective, that should be safe.
 newTag :: CompletionQueue -> IO C.Tag
-newTag CompletionQueue{..} = do
-  i <- atomicModifyIORef' nextTag (\i -> (i+1,i))
+newTag q = do
+  i <- atomicModifyIORef' (nextTag q) (\i -> (i+1,i))
   return $ C.Tag $ plusPtr nullPtr i
 
 -- | Safely brackets an operation that pushes work onto or plucks results from
@@ -104,7 +108,7 @@ withPermission op cq act = bracket acquire release $ \gotResource ->
 -- 'serverRequestCall', this will block forever unless a timeout is given.
 pluck :: CompletionQueue -> C.Tag -> Maybe TimeoutSeconds
          -> IO (Either GRPCIOError ())
-pluck cq@CompletionQueue{..} tag mwait = do
+pluck cq tag mwait = do
   grpcDebug $ "pluck: called with tag=" ++ show tag ++ ",mwait=" ++ show mwait
   withPermission Pluck cq $ next' cq tag mwait
 
@@ -113,20 +117,20 @@ next' :: CompletionQueue
        -> C.Tag
        -> Maybe TimeoutSeconds
        -> IO (Either GRPCIOError ())
-next' CompletionQueue{..} tag mwait =
+next' q tag mwait =
   maybe C.withInfiniteDeadline C.withDeadlineSeconds mwait $ \dead -> do
     grpcDebug $ "next: blocking on grpc_completion_queue_pluck for tag=" ++ show tag
-    ev <- C.grpcCompletionQueueNext unsafeCQ dead C.reserved
+    ev <- C.grpcCompletionQueueNext (unsafeCQ q) dead C.reserved
     grpcDebug $ "next finished: " ++ show ev
     return $ if isEventSuccessful ev then Right () else eventToError ev
 
 next :: CompletionQueue
        -> Maybe TimeoutSeconds
        -> IO (Either GRPCIOError C.Event)
-next CompletionQueue{..} mwait =
+next cq mwait =
   maybe C.withInfiniteDeadline C.withDeadlineSeconds mwait $ \dead -> do
     grpcDebug $ "next: blocking on grpc_completion_queue_next"
-    ev <- C.grpcCompletionQueueNext unsafeCQ dead C.reserved
+    ev <- C.grpcCompletionQueueNext (unsafeCQ cq) dead C.reserved
     grpcDebug $ "next finished: " ++ show ev
     return $ if isEventSuccessful ev then Right ev else eventToError ev
 
@@ -160,27 +164,29 @@ getLimit Pluck = C.maxCompletionQueuePluckers
 -- queue after we begin the shutdown process. Errors with
 -- 'GRPCIOShutdownFailure' if the queue can't be shut down within 5 seconds.
 shutdownCompletionQueueForPluck :: CompletionQueue -> IO (Either GRPCIOError ())
-shutdownCompletionQueueForPluck scq@CompletionQueue{..} = do
-  atomically $ writeTVar shuttingDown True
-  atomically $ do
-    readTVar currentPushers  >>= check . (==0)
-    readTVar currentPluckers >>= check . (==0)
+shutdownCompletionQueueForPluck cq = do
+  atomically $ writeTVar (shuttingDown cq) True
+  case cq of
+    NextQueue{} -> pure ()
+    CompletionQueue{..} -> atomically $ do
+      readTVar currentPushers  >>= check . (==0)
+      readTVar currentPluckers >>= check . (==0)
   --drain the queue
-  C.grpcCompletionQueueShutdown unsafeCQ
+  C.grpcCompletionQueueShutdown (unsafeCQ cq)
   loopRes <- timeout (5*10^(6::Int)) drainLoop
   grpcDebug $ "Got CQ loop shutdown result of: " ++ show loopRes
   case loopRes of
     Nothing -> return $ Left GRPCIOShutdownFailure
     Just (Left GRPCIOTimeout) -> return (Left GRPCIOTimeout)
-    Just (Right ()) -> C.grpcCompletionQueueDestroy unsafeCQ >> return (Right ())
+    Just (Right ()) -> C.grpcCompletionQueueDestroy (unsafeCQ cq) >> return (Right ())
     _ -> fail "error"
 
   where drainLoop :: IO (Either GRPCIOError ())
         drainLoop = do
           grpcDebug "drainLoop: before pluck() call"
-          void $ newTag scq
+          void $ newTag cq
           ev <- C.withDeadlineSeconds 1 $ \deadline ->
-                  C.grpcCompletionQueueNext unsafeCQ deadline C.reserved
+                  C.grpcCompletionQueueNext (unsafeCQ cq) deadline C.reserved
           grpcDebug $ "drainLoop: pluck() call got " ++ show ev
           case C.eventCompletionType ev of
             C.QueueShutdown -> return (Right ())
@@ -188,25 +194,27 @@ shutdownCompletionQueueForPluck scq@CompletionQueue{..} = do
             C.OpComplete -> drainLoop
 
 shutdownCompletionQueueForNext :: CompletionQueue -> IO (Either GRPCIOError ())
-shutdownCompletionQueueForNext CompletionQueue{..} = do
-  atomically $ writeTVar shuttingDown True
+shutdownCompletionQueueForNext cq = do
+  atomically $ writeTVar (shuttingDown cq) True
   -- TODO: Probably don't need to check currentPushers and currentPluckers here.
-  atomically $ do
-    readTVar currentPushers  >>= check . (==0)
-    readTVar currentPluckers >>= check . (==0)
+  case cq of
+    NextQueue{} -> pure ()
+    CompletionQueue{..} -> atomically $ do
+      readTVar currentPushers  >>= check . (==0)
+      readTVar currentPluckers >>= check . (==0)
   --drain the queue
-  C.grpcCompletionQueueShutdown unsafeCQ
+  C.grpcCompletionQueueShutdown (unsafeCQ cq)
   loopRes <- timeout (5*10^(6::Int)) drainLoop
   grpcDebug $ "Got CQ loop shutdown result of: " ++ show loopRes
   case loopRes of
     Nothing -> return $ Left GRPCIOShutdownFailure
-    Just () -> C.grpcCompletionQueueDestroy unsafeCQ >> return (Right ())
+    Just () -> C.grpcCompletionQueueDestroy (unsafeCQ cq) >> return (Right ())
 
   where drainLoop :: IO ()
         drainLoop = do
           grpcDebug "drainLoop: before next() call"
           ev <- C.withDeadlineSeconds 1 $ \deadline ->
-                  C.grpcCompletionQueueNext unsafeCQ deadline C.reserved
+                  C.grpcCompletionQueueNext (unsafeCQ cq) deadline C.reserved
           grpcDebug $ "drainLoop: next() call got " ++ show ev
           case C.eventCompletionType ev of
             C.QueueShutdown -> return ()
