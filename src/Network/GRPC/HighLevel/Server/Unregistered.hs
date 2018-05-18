@@ -37,12 +37,17 @@ import qualified System.Posix.Signals as P
 data CallStateException = ImpossiblePayload String | NotFound C.Event | GRPCException GRPCIOError | UnknownHandler MethodName
   deriving (Show, Typeable)
 
+instance Exception CallStateException
+
+data ServerException = Terminated
+  deriving (Show, Typeable)
+
+instance Exception ServerException
+
 -- If an exception happens in a handler, don't kill the server.
 -- Cleaning up resources in exceptional cases
 -- Shutting down the server by cancelling in progress async requests
 -- Shutting down the server at all
-
-instance Exception CallStateException
 
 runCallState :: AsyncServer -> CallState -> [Handler 'Normal] -> IO (Async ())
 runCallState server callState allHandlers = case callState of
@@ -139,7 +144,7 @@ asyncServerLoop ServerOptions{..} = do
   -- We run the loop in a new thread so that we can kill the serverLoop thread.
   -- Without this fork, we block on a foreign call, which can't be interrupted.
   mainId <- myThreadId
-  P.installHandler P.sigTERM (P.Catch $ throwTo mainId UserInterrupt) Nothing
+  P.installHandler P.sigTERM (P.Catch $ throwTo mainId Terminated) Nothing
 
   withGRPC $ \grpc -> do
     server <- startAsyncServer grpc config
@@ -150,9 +155,11 @@ asyncServerLoop ServerOptions{..} = do
                  optClientStreamHandlers
                  optServerStreamHandlers
                  optBiDiStreamHandlers
+    let cleanup = cancel callLoop >> cancel opsLoop
 
     void (waitBoth callLoop opsLoop)
-      `catchAsync` (\UserInterrupt -> cancel callLoop >> cancel opsLoop)
+      `catchAsync` (\UserInterrupt -> cleanup)
+      `catchAsync` (\Terminated -> cleanup)
       `finally` (stopAsyncServer server)
 
 
