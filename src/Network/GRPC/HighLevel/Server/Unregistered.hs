@@ -164,7 +164,7 @@ asyncDispatchLoop :: AsyncServer
              -> [Handler 'BiDiStreaming]
              -> IO ()
 asyncDispatchLoop s logger md hN hC hS hB = do
-  initialCallDataAsync <- runCallState s Listen Nothing hN-- C.grpcServerRequestCall >> returns (Process ServerCall)
+  initialCallDataAsync <- runCallState s Listen Nothing hN
   initialCallData <- wait initialCallDataAsync
   case initialCallData of
 
