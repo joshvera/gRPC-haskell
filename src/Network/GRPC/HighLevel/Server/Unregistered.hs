@@ -93,12 +93,13 @@ runCallState server callState allHandlers = case callState of
         (rsp, trailMeta, st, ds) <- f serverCall body
         let operations = [ OpRecvCloseOnServer , OpSendMessage rsp, OpSendStatusFromServer trailMeta st ds ]
         runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array, contexts) -> do
-          let state = AcknowledgeResponse serverCall pointers tag array contexts
+          let state = AcknowledgeResponse pointers tag array contexts
           replaceCall server tag state
           pure ()
     where
       findHandler sc = find ((== U.callMethod sc) . handlerMethodName)
-  (AcknowledgeResponse serverCall (callPtr, metadataPtr, callDetails) tag array contexts) -> do
+  (AcknowledgeResponse (callPtr, metadataPtr, callDetails) tag array contexts) -> do
+    teardownOpArrayAndContexts array contexts -- Safe to teardown after calling 'resultFromOpContext'.
     C.metadataArrayDestroy metadataPtr
     C.destroyCallDetails callDetails
     C.free callPtr

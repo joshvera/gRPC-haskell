@@ -100,7 +100,7 @@ data CallState where
   Listen :: CallState
   StartRequest :: (Ptr C.Call, Ptr C.MetadataArray, C.CallDetails) -> C.MetadataArray -> C.Tag -> CallState
   ReceivePayload :: U.ServerCall -> (Ptr C.Call, Ptr C.MetadataArray, C.CallDetails) -> C.Tag -> C.OpArray -> [OpContext] -> CallState
-  AcknowledgeResponse :: U.ServerCall -> (Ptr C.Call, Ptr C.MetadataArray, C.CallDetails) -> C.Tag -> C.OpArray -> [OpContext] -> CallState
+  AcknowledgeResponse :: (Ptr C.Call, Ptr C.MetadataArray, C.CallDetails) -> C.Tag -> C.OpArray -> [OpContext] -> CallState
 
 lookupCall :: AsyncServer -> C.Tag -> IO (Maybe (CallState))
 lookupCall s t = HashMap.lookup t <$> readIORef (inProgressRequests s)
