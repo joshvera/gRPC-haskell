@@ -321,7 +321,9 @@ stopAsyncServer :: AsyncServer -> IO ()
 -- TODO: Do method handles need to be freed?
 stopAsyncServer AsyncServer{ unsafeServer = s, .. } = do
   grpcDebug "stopAsyncServer: shutdownNotify serverCallQueue"
-  shutdownNotify serverCallQueue
+  shutdownQueue <- createCompletionQueueForNext serverGRPC
+  shutdownNotify shutdownQueue
+  shutdownCQ shutdownQueue
   grpcDebug "stopAsyncServer: cleaning up forks."
   cleanupForks
   grpcDebug "stopAsyncServer: call grpc_server_destroy."
