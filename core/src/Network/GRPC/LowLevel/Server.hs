@@ -320,17 +320,17 @@ startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \
 stopAsyncServer :: AsyncServer -> IO ()
 -- TODO: Do method handles need to be freed?
 stopAsyncServer AsyncServer{ unsafeServer = s, .. } = do
-  grpcDebug "stopAsyncServer: calling shutdownNotify on shutdown queue."
+  grpcDebug "stopAsyncServer: shutdownNotify serverCallQueue"
   shutdownNotify serverCallQueue
-  C.grpcServerCancelAllCalls s
   grpcDebug "stopAsyncServer: cleaning up forks."
   cleanupForks
   grpcDebug "stopAsyncServer: call grpc_server_destroy."
   C.grpcServerDestroy s
-  grpcDebug "stopAsyncServer: shutting down queues"
   -- Queues must be shut down after the server is destroyed.
-  shutdownCQ serverCallQueue
+  grpcDebug "stopAsyncServer: shutting serverOpsQueue"
   shutdownCQ serverOpsQueue
+  grpcDebug "stopAsyncServer: shutting serverCallQueue"
+  shutdownCQ serverCallQueue
 
 
   where shutdownCQ scq = do
@@ -351,7 +351,10 @@ stopAsyncServer AsyncServer{ unsafeServer = s, .. } = do
             -- This case occurs when we pluck but the queue is already in the
             -- 'shuttingDown' state, implying we already tried to shut down.
             Left GRPCIOShutdown -> error "Called stopServer twice!"
-            Left _              -> error "Failed to stop server."
+            Left GRPCIOTimeout -> do
+              grpcDebug "stopAsyncServer: shutdownNotify: Could not stop cleanly. Cancelling all calls."
+              C.grpcServerCancelAllCalls s
+            Left err              -> error ("Failed to stop server:" ++ show err)
             Right _             -> return ()
         cleanupForks = do
           atomically $ writeTVar serverShuttingDown True
