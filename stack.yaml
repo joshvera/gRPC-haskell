@@ -2,25 +2,24 @@
 # For more information, see: http://docs.haskellstack.org/en/stable/yaml_configuration/
 
 # Specifies the GHC version and set of packages available (e.g., lts-3.5, nightly-2015-09-21, ghc-7.10.2)
-resolver: lts-11.7
+resolver: nightly-2018-05-18
 
 # Local packages, usually specified by relative directory name
 packages:
 - '.'
 - 'core'
 - location:
-    git: git@github.com:joshvera/proto3-suite.git
-    commit: a02c4bd01d3c6b1cefee6865f241c3cabab10817
+    git: git@github.com:patrickt/proto3-suite.git
+    commit: c374f622936456582ef756b5d9142834a7a7ba5e
   extra-dep: true
 - location:
-    git: git@github.com:awakenetworks/proto3-wire.git
-    commit: c076246ca3d933f2145919f8f6b4809e73a8ab89
+    git: git@github.com:patrickt/proto3-wire.git
+    commit: 7adafc6a1a5143a8f0e741a0828aff2628710384
   extra-dep: true
 # Packages to be pulled from upstream that are not in the resolver (e.g., acme-missiles-0.3)
-extra-deps: [ aeson-1.2.4.0
-            , managed-1.0.5
-            , swagger2-2.1.6
-            ]
+
+extra-deps:
+- range-set-list-0.1.2.1
 
 # Override default flag values for local packages and extra-deps
 flags: {}

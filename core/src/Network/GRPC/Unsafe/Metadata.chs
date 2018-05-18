@@ -35,10 +35,13 @@ newtype MetadataMap = MetadataMap {unMap :: M.Map ByteString (SL.SortedList Byte
 instance Show MetadataMap where
   show m = "fromList " ++ show (M.toList (unMap m))
 
+instance Semigroup MetadataMap where
+  (MetadataMap m1) <> (MetadataMap m2) =
+    MetadataMap $ M.unionWith mappend m1 m2
+
 instance Monoid MetadataMap where
   mempty = MetadataMap $ M.empty
-  mappend (MetadataMap m1) (MetadataMap m2) =
-    MetadataMap $ M.unionWith mappend m1 m2
+  mappend = (<>)
 
 instance IsList MetadataMap where
   type Item MetadataMap = (ByteString, ByteString)
