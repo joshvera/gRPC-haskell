@@ -14,7 +14,8 @@ import Control.Concurrent (myThreadId, threadDelay)
 import System.Exit (exitSuccess, ExitCode(..))
 import           Control.Concurrent.Async                  (async, wait, concurrently_, Async, cancel, race_, waitAnyCancel, waitBoth)
 import Control.Exception.Safe hiding (Handler)
-import Control.Exception (AsyncException(..))
+import qualified Control.Exception.Safe as E
+import Control.Exception (AsyncException(..), asyncExceptionFromException, asyncExceptionToException)
 import           Control.Monad
 import           Data.Foldable                             (find)
 import           Network.GRPC.HighLevel.Server
@@ -42,7 +43,9 @@ instance Exception CallStateException
 data ServerException = Terminated
   deriving (Show, Typeable)
 
-instance Exception ServerException
+instance Exception ServerException where
+  fromException = asyncExceptionFromException
+  toException = asyncExceptionToException
 
 -- If an exception happens in a handler, don't kill the server.
 -- Cleaning up resources in exceptional cases
@@ -155,11 +158,12 @@ asyncServerLoop ServerOptions{..} = do
                  optClientStreamHandlers
                  optServerStreamHandlers
                  optBiDiStreamHandlers
-    let cleanup = cancel callLoop >> cancel opsLoop
 
-    void (waitBoth callLoop opsLoop)
-      `catchAsync` (\UserInterrupt -> cleanup)
-      `catchAsync` (\Terminated -> cleanup)
+    void (waitAnyCancel [callLoop, opsLoop])
+      `catchesAsync` [
+          E.Handler (\UserInterrupt -> cancel callLoop)
+        , E.Handler (\Terminated    -> cancel callLoop)
+        ]
       `finally` (stopAsyncServer server)
 
 
