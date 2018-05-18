@@ -89,8 +89,8 @@ runCallState server callState allHandlers = case callState of
 
         (rsp, trailMeta, st, ds) <- f serverCall body
         let operations = [ OpRecvCloseOnServer , OpSendMessage rsp, OpSendStatusFromServer trailMeta st ds ]
-        runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array, contexts) -> do
-          let state = AcknowledgeResponse pointers tag array contexts
+        runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array', contexts') -> do
+          let state = AcknowledgeResponse pointers tag array' contexts'
           replaceCall server tag state
       Left x -> do
         grpcDebug "ReceivePayload: ops failed; aborting"
