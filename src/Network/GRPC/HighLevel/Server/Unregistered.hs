@@ -106,6 +106,59 @@ runCallState server callState allHandlers = case callState of
     deleteCall server tag
     async (pure ())
 
+asyncDispatchLoop :: AsyncServer
+             -> (String -> IO ())
+             -> MetadataMap
+             -> [Handler 'Normal]
+             -> [Handler 'ClientStreaming]
+             -> [Handler 'ServerStreaming]
+             -> [Handler 'BiDiStreaming]
+             -> IO ()
+asyncDispatchLoop s logger md hN _ _ _ = do
+  wait <$> runCallState s Listen hN
+  loop (serverCallQueue s) (Just 1) `concurrently_` loop (serverOpsQueue s) Nothing
+  where
+    loop queue timeout = forever $ do
+      eitherEvent <- next queue timeout
+      case eitherEvent of
+        Right event -> do
+          clientCallData <- lookupCall s (C.eventTag event)
+          case clientCallData of
+            Just callData -> runCallState s callData hN
+            Nothing -> async (CE.throw $ NotFound event)
+        Left err -> async (CE.throw err)
+
+asyncServerLoop :: ServerOptions -> IO ()
+asyncServerLoop ServerOptions{..} = do
+  -- We run the loop in a new thread so that we can kill the serverLoop thread.
+  -- Without this fork, we block on a foreign call, which can't be interrupted.
+  tid <- async $ withGRPC $ \grpc ->
+    withAsyncServer grpc config $ \server -> do
+      asyncDispatchLoop server
+                   optLogger
+                   optInitialMetadata
+                   optNormalHandlers
+                   optClientStreamHandlers
+                   optServerStreamHandlers
+                   optBiDiStreamHandlers
+  wait tid
+  where
+    config = ServerConfig
+      { host                             = optServerHost
+      , port                             = optServerPort
+      , methodsToRegisterNormal          = []
+      , methodsToRegisterClientStreaming = []
+      , methodsToRegisterServerStreaming = []
+      , methodsToRegisterBiDiStreaming   = []
+      , serverArgs                       =
+          [CompressionAlgArg GrpcCompressDeflate | optUseCompression]
+          ++
+          [ UserAgentPrefix optUserAgentPrefix
+          , UserAgentSuffix optUserAgentSuffix
+          ]
+      , sslConfig = optSSLConfig
+      }
+
 dispatchLoop :: Server
              -> (String -> IO ())
              -> MetadataMap
@@ -151,28 +204,6 @@ dispatchLoop s logger md hN hC hS hB =
     handleError = (handleCallError logger . left herr =<<) . CE.try
       where herr (e :: CE.SomeException) = GRPCIOHandlerException (show e)
 
-asyncDispatchLoop :: AsyncServer
-             -> (String -> IO ())
-             -> MetadataMap
-             -> [Handler 'Normal]
-             -> [Handler 'ClientStreaming]
-             -> [Handler 'ServerStreaming]
-             -> [Handler 'BiDiStreaming]
-             -> IO ()
-asyncDispatchLoop s logger md hN hC hS hB = do
-  wait <$> runCallState s Listen hN
-  loop (serverCallQueue s) (Just 1) `concurrently_` loop (serverOpsQueue s) Nothing
-  where
-    loop queue timeout = forever $ do
-      eitherEvent <- next queue timeout
-      case eitherEvent of
-        Right event -> do
-          clientCallData <- lookupCall s (C.eventTag event)
-          case clientCallData of
-            Just callData -> runCallState s callData hN
-            Nothing -> async (CE.throw $ NotFound event)
-        Left err -> async (CE.throw err)
-
 serverLoop :: ServerOptions -> IO ()
 serverLoop ServerOptions{..} = do
   -- We run the loop in a new thread so that we can kill the serverLoop thread.
@@ -180,37 +211,6 @@ serverLoop ServerOptions{..} = do
   tid <- async $ withGRPC $ \grpc ->
     withServer grpc config $ \server -> do
       dispatchLoop server
-                   optLogger
-                   optInitialMetadata
-                   optNormalHandlers
-                   optClientStreamHandlers
-                   optServerStreamHandlers
-                   optBiDiStreamHandlers
-  wait tid
-  where
-    config = ServerConfig
-      { host                             = optServerHost
-      , port                             = optServerPort
-      , methodsToRegisterNormal          = []
-      , methodsToRegisterClientStreaming = []
-      , methodsToRegisterServerStreaming = []
-      , methodsToRegisterBiDiStreaming   = []
-      , serverArgs                       =
-          [CompressionAlgArg GrpcCompressDeflate | optUseCompression]
-          ++
-          [ UserAgentPrefix optUserAgentPrefix
-          , UserAgentSuffix optUserAgentSuffix
-          ]
-      , sslConfig = optSSLConfig
-      }
-
-asyncServerLoop :: ServerOptions -> IO ()
-asyncServerLoop ServerOptions{..} = do
-  -- We run the loop in a new thread so that we can kill the serverLoop thread.
-  -- Without this fork, we block on a foreign call, which can't be interrupted.
-  tid <- async $ withGRPC $ \grpc ->
-    withAsyncServer grpc config $ \server -> do
-      asyncDispatchLoop server
                    optLogger
                    optInitialMetadata
                    optNormalHandlers
