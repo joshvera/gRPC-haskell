@@ -26,7 +26,7 @@ import qualified Network.GRPC.Unsafe.Metadata                   as C
 import qualified Network.GRPC.Unsafe.Time                       as C
 import           Foreign.Storable                               (peek)
 import           Network.GRPC.LowLevel.CompletionQueue.Internal (newTag, CompletionQueue(..), next)
-import           Network.GRPC.LowLevel.Op (runOpsAsync, resultFromOpContext, teardownOpArrayAndContexts)
+import           Network.GRPC.LowLevel.Op (runOpsAsync, resultFromOpContext, destroyOpArrayAndContexts, readAndDestroy)
 import Data.Maybe (catMaybes)
 import qualified Foreign.Marshal.Alloc as C
 
@@ -73,8 +73,7 @@ runCallState server callState allHandlers = case callState of
 
   (ReceivePayload serverCall pointers tag array contexts) -> do
     grpcDebug ("ReceivePayload: Received payload with tag" ++ show tag)
-    payload <- Right . catMaybes <$> (traverse resultFromOpContext contexts)
-      `finally` teardownOpArrayAndContexts array contexts -- Safe to teardown after calling 'resultFromOpContext'.
+    payload <- readAndDestroy array contexts
     grpcDebug "ReceivePayload: Received MessageResult"
     -- TODO bracket this call
     normalHandler <- maybe (throw $ UnknownHandler (U.callMethod serverCall)) pure (findHandler serverCall allHandlers)
@@ -83,7 +82,7 @@ runCallState server callState allHandlers = case callState of
             (UnaryHandler _ handler) -> convertServerHandler handler (const string <$> U.convertCall serverCall)
 
     async $ case payload of
-      Right [OpRecvMessageResult (Just body)] -> do
+      [OpRecvMessageResult (Just body)] -> do
         grpcDebug ("ReceivePayload: Received payload:" ++ show body)
 
         (rsp, trailMeta, st, ds) <- f serverCall body
@@ -91,14 +90,11 @@ runCallState server callState allHandlers = case callState of
         runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array', contexts') -> do
           let state = AcknowledgeResponse serverCall pointers tag array' contexts'
           replaceCall server tag state
-      Left x -> do
-        grpcDebug "ReceivePayload: ops failed; aborting"
-        throw (GRPCException x)
       rest -> throw (ImpossiblePayload $ "ReceivePayload: Impossible payload result: " ++ show rest)
     where
       findHandler sc = find ((== U.callMethod sc) . handlerMethodName)
   (AcknowledgeResponse serverCall (callPtr, metadataPtr, callDetails) tag array contexts) -> do
-    teardownOpArrayAndContexts array contexts -- Safe to teardown after calling 'resultFromOpContext'.
+    destroyOpArrayAndContexts array contexts -- Safe to teardown after calling 'resultFromOpContext'.
     deleteCall server tag
     C.metadataArrayDestroy metadataPtr
     C.destroyCallDetails callDetails

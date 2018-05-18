@@ -225,6 +225,11 @@ runOps call cq ops =
               fmap (Right . catMaybes) $ mapM resultFromOpContext contexts
             Left err -> return $ Left err
 
+readAndDestroy :: C.OpArray -> [OpContext] -> IO [OpRecvResult]
+readAndDestroy array contexts = results `finally` destroyOpArrayAndContexts array contexts
+  where results = catMaybes <$> traverse resultFromOpContext contexts
+
+
 runOpsAsync :: C.Call
             -- ^ 'Call' that this batch is associated with. One call can be
             -- associated with many batches.
@@ -236,7 +241,7 @@ runOpsAsync :: C.Call
             -- ^ The list of 'Op's to execute.
             -> ((C.OpArray, [OpContext]) -> IO b)
             -- ^ A function that yields allocated OpArray and OpContexts.
-            -- You are responsible for freeing these with 'teardownOpArrayAndContexts'.
+            -- You are responsible for freeing these with 'destroyOpArrayAndContexts'.
             -> IO b
 runOpsAsync call cq tag ops fun =
   let l = length ops in do
@@ -245,13 +250,13 @@ runOpsAsync call cq tag ops fun =
     grpcDebug $ "runOpsAsync: tag: " ++ show tag
     grpcDebug $ "runOpsAsync: call: " ++ show call
     value <- fun (opArray, contexts)
-    callError <- startBatch cq call opArray l tag
+    callError <- startBatch cq call opArray l tag `onException` destroyOpArrayAndContexts opArray contexts
     grpcDebug "runOpsAsync: called start_batch."
     case callError of
       Left x -> grpcDebug ("runOpsAsync: callError:" ++ show callError) >> throw x
       Right () -> pure value
 
-teardownOpArrayAndContexts array contexts = do
+destroyOpArrayAndContexts array contexts = do
   C.opArrayDestroy array (length contexts)
   mapM_ freeOpContext contexts
 
