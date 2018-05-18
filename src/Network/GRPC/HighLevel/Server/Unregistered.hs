@@ -25,18 +25,14 @@ import           Proto3.Suite.Class
 import qualified Network.GRPC.Unsafe                            as C
 import qualified Network.GRPC.Unsafe.Metadata                   as C
 import qualified Network.GRPC.Unsafe.Time                       as C
-import           Control.Monad.Managed
 import           Foreign.Storable                               (peek)
 import           Network.GRPC.LowLevel.CompletionQueue.Internal (newTag, CompletionQueue(..), next)
-import           Network.GRPC.LowLevel.Op (OpContext, runOpsAsync, resultFromOpContext, teardownOpArrayAndContexts)
-import qualified Network.GRPC.Unsafe.Op                         as C
+import           Network.GRPC.LowLevel.Op (runOpsAsync, resultFromOpContext, teardownOpArrayAndContexts)
 import Data.Maybe (catMaybes)
-import Data.ByteString (ByteString)
-import Foreign.Ptr (nullPtr)
 import qualified Foreign.Marshal.Alloc as C
 
-runCallState :: AsyncServer -> CallState -> Maybe C.Event -> [Handler 'Normal] -> IO (Async (Either GRPCIOError ()))
-runCallState server callState event allHandlers = case callState of
+runCallState :: AsyncServer -> CallState -> [Handler 'Normal] -> IO (Async (Either GRPCIOError ()))
+runCallState server callState allHandlers = case callState of
   Listen -> do
     tag' <- newTag (serverCallQueue server)
     grpcDebug ("Creating tag" ++ show tag')
@@ -55,7 +51,7 @@ runCallState server callState event allHandlers = case callState of
 
   (StartRequest pointers@(callPtr, _, callDetails) metadata tag) -> do
     grpcDebug ("Processing tag" ++ show tag)
-    nextCallAsync <- runCallState server Listen Nothing allHandlers
+    nextCallAsync <- runCallState server Listen allHandlers
     nextCall <- wait nextCallAsync
 
     case nextCall of
@@ -164,7 +160,7 @@ asyncDispatchLoop :: AsyncServer
              -> [Handler 'BiDiStreaming]
              -> IO ()
 asyncDispatchLoop s logger md hN hC hS hB = do
-  initialCallDataAsync <- runCallState s Listen Nothing hN
+  initialCallDataAsync <- runCallState s Listen hN
   initialCallData <- wait initialCallDataAsync
   case initialCallData of
 
@@ -177,7 +173,7 @@ asyncDispatchLoop s logger md hN hC hS hB = do
             Right event -> do
               clientCallData <- lookupCall s (C.eventTag event)
               case clientCallData of
-                Just callData -> runCallState s callData (Just event) hN
+                Just callData -> runCallState s callData hN
                 Nothing -> async (error "Failed to lookup call data")
             Left err -> async (error ("Failed to fetch event" ++ show err))
         clientLoop = forever $ do
@@ -186,7 +182,7 @@ asyncDispatchLoop s logger md hN hC hS hB = do
             Right event -> do
               clientCallData <- lookupCall s (C.eventTag event)
               case clientCallData of
-                Just callData -> runCallState s callData (Just event) hN
+                Just callData -> runCallState s callData hN
                 Nothing -> async (error "Failed to lookup call data")
             Left err -> async (error ("Failed to fetch event" ++ show err))
 
