@@ -144,7 +144,7 @@ asyncServerLoop ServerOptions{..} = do
   -- We run the loop in a new thread so that we can kill the serverLoop thread.
   -- Without this fork, we block on a foreign call, which can't be interrupted.
   mainId <- myThreadId
-  P.installHandler P.sigTERM (P.Catch $ throwTo mainId Terminated) Nothing
+  P.installHandler P.sigTERM (P.CatchOnce $ throwTo mainId Terminated) Nothing
 
   withGRPC $ \grpc -> do
     server <- startAsyncServer grpc config
