@@ -36,10 +36,6 @@ data CallStateException = ImpossiblePayload String | NotFound C.Event | GRPCExce
 
 instance CE.Exception CallStateException
 
--- Error handling
--- Cancelling asyncs
--- Server shutdown
-
 runCallState :: AsyncServer -> CallState -> [Handler 'Normal] -> IO (Async ())
 runCallState server callState allHandlers = case callState of
   Listen -> do
@@ -55,7 +51,6 @@ runCallState server callState allHandlers = case callState of
       C.CallOk -> do
         let state = StartRequest (callPtr, metadataPtr, callDetails) metadata tag'
         insertCall server tag' state
-        pure ()
       other -> CE.throw (GRPCIOCallError other)
 
   (StartRequest pointers@(callPtr, _, callDetails) metadata tag) -> do
@@ -76,7 +71,6 @@ runCallState server callState allHandlers = case callState of
       let state = ReceivePayload serverCall pointers tag array contexts
       replaceCall server tag state
       grpcDebug "Set a message result"
-      pure ()
 
   (ReceivePayload serverCall pointers tag array contexts) -> do
     grpcDebug ("ReceivePayload: Received payload with tag" ++ show tag)
@@ -100,7 +94,6 @@ runCallState server callState allHandlers = case callState of
         runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array, contexts) -> do
           let state = AcknowledgeResponse pointers tag array contexts
           replaceCall server tag state
-          pure ()
       Left x -> do
         grpcDebug "ReceivePayload: ops failed; aborting"
         CE.throw (GRPCException x)
@@ -113,7 +106,6 @@ runCallState server callState allHandlers = case callState of
     C.destroyCallDetails callDetails
     C.free callPtr
     deleteCall server tag
-
     async (pure ())
 
 dispatchLoop :: Server
