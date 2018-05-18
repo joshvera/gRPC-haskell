@@ -33,6 +33,11 @@ import qualified Foreign.Marshal.Alloc as C
 data CallStateException = ImpossiblePayload String | NotFound C.Event | GRPCException GRPCIOError | UnknownHandler MethodName
   deriving (Show, Typeable)
 
+-- If an exception happens in a handler, don't kill the server.
+-- Cleaning up resources in exceptional cases
+-- Shutting down the server by cancelling in progress async requests
+-- Shutting down the server at all
+
 instance Exception CallStateException
 
 runCallState :: AsyncServer -> CallState -> [Handler 'Normal] -> IO (Async ())
@@ -46,15 +51,20 @@ runCallState server callState allHandlers = case callState of
     callDetails <- C.createCallDetails
     callError <- C.grpcServerRequestCall (unsafeServer (server :: AsyncServer)) callPtr callDetails metadata (unsafeCQ . serverOpsQueue $ server) (unsafeCQ . serverCallQueue $ server) tag'
 
-    async $ case callError of
-      C.CallOk -> do
-        let state = StartRequest (callPtr, metadataPtr, callDetails) metadata tag'
-        insertCall server tag' state
-      other -> throw (GRPCIOCallError other)
+    let cleanup = do
+          C.metadataArrayDestroy metadataPtr
+          C.destroyCallDetails callDetails
+          C.free callPtr
+        go = case callError of
+               C.CallOk -> do
+                 let state = StartRequest callPtr callDetails metadata tag' cleanup
+                 insertCall server tag' state
+               other -> throw (GRPCIOCallError other)
 
-  (StartRequest pointers@(callPtr, _, callDetails) metadata tag) -> do
-    grpcDebug ("Processing tag" ++ show tag)
+    async (go `onException` cleanup)
+  (StartRequest callPtr callDetails metadata tag cleanup) -> do
     _ <- wait <$> runCallState server Listen allHandlers
+
     serverCall <- U.ServerCall
       <$> peek callPtr
       <*> pure (serverOpsQueue server)
@@ -63,43 +73,39 @@ runCallState server callState allHandlers = case callState of
       <*> (MethodName <$> C.callDetailsGetMethod   callDetails)
       <*> (Host       <$> C.callDetailsGetHost     callDetails)
 
-    grpcDebug "Send initial metadata"
-    let operations = [ OpSendInitialMetadata (U.metadata serverCall), OpRecvMessage ]
-    async $ runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array, contexts) -> do
-      grpcDebug "Creating a message result"
-      let state = ReceivePayload serverCall pointers tag array contexts
-      replaceCall server tag state
-      grpcDebug "Set a message result"
+    let
+      cleanup' = cleanup >> U.destroyServerCall serverCall
+      operations = [ OpSendInitialMetadata (U.metadata serverCall), OpRecvMessage ]
+      sendOps = runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array, contexts) -> do
+        let state = ReceivePayload serverCall tag array contexts cleanup'
+        replaceCall server tag state `onException` destroyOpArrayAndContexts array contexts
+    async (sendOps `onException` cleanup')
 
-  (ReceivePayload serverCall pointers tag array contexts) -> do
-    grpcDebug ("ReceivePayload: Received payload with tag" ++ show tag)
+  (ReceivePayload serverCall tag array contexts cleanup) -> do
     payload <- readAndDestroy array contexts
     grpcDebug "ReceivePayload: Received MessageResult"
-    -- TODO bracket this call
     normalHandler <- maybe (throw $ UnknownHandler (U.callMethod serverCall)) pure (findHandler serverCall allHandlers)
-    let f _ string =
-          case normalHandler of
-            (UnaryHandler _ handler) -> convertServerHandler handler (const string <$> U.convertCall serverCall)
-
-    async $ case payload of
-      [OpRecvMessageResult (Just body)] -> do
-        grpcDebug ("ReceivePayload: Received payload:" ++ show body)
-
-        (rsp, trailMeta, st, ds) <- f serverCall body
-        let operations = [ OpRecvCloseOnServer , OpSendMessage rsp, OpSendStatusFromServer trailMeta st ds ]
-        runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array', contexts') -> do
-          let state = AcknowledgeResponse serverCall pointers tag array' contexts'
-          replaceCall server tag state
-      rest -> throw (ImpossiblePayload $ "ReceivePayload: Impossible payload result: " ++ show rest)
+      `onException` cleanup
+    async (callHandler normalHandler payload `onException` cleanup)
     where
       findHandler sc = find ((== U.callMethod sc) . handlerMethodName)
-  (AcknowledgeResponse serverCall (callPtr, metadataPtr, callDetails) tag array contexts) -> do
+      f normalHandler string =
+        case normalHandler of
+          (UnaryHandler _ handler) -> convertServerHandler handler (const string <$> U.convertCall serverCall)
+      callHandler normalHandler = \case
+        [OpRecvMessageResult (Just body)] -> do
+          grpcDebug ("ReceivePayload: Received payload:" ++ show body)
+
+          (rsp, trailMeta, st, ds) <- f normalHandler body
+
+          let operations = [ OpRecvCloseOnServer , OpSendMessage rsp, OpSendStatusFromServer trailMeta st ds ]
+          runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array', contexts') -> do
+            let state = AcknowledgeResponse tag array' contexts' cleanup
+            replaceCall server tag state `onException` destroyOpArrayAndContexts array' contexts'
+        rest -> throw (ImpossiblePayload $ "ReceivePayload: Impossible payload result: " ++ show rest)
+  (AcknowledgeResponse tag array contexts cleanup) -> do
     destroyOpArrayAndContexts array contexts -- Safe to teardown after calling 'resultFromOpContext'.
-    deleteCall server tag
-    C.metadataArrayDestroy metadataPtr
-    C.destroyCallDetails callDetails
-    C.free callPtr
-    U.destroyServerCall serverCall
+    deleteCall server tag `finally` cleanup
     async (pure ())
 
 asyncDispatchLoop :: AsyncServer

@@ -98,9 +98,9 @@ data AsyncServer = AsyncServer
 
 data CallState where
   Listen :: CallState
-  StartRequest :: (Ptr C.Call, Ptr C.MetadataArray, C.CallDetails) -> C.MetadataArray -> C.Tag -> CallState
-  ReceivePayload :: U.ServerCall -> (Ptr C.Call, Ptr C.MetadataArray, C.CallDetails) -> C.Tag -> C.OpArray -> [OpContext] -> CallState
-  AcknowledgeResponse :: U.ServerCall -> (Ptr C.Call, Ptr C.MetadataArray, C.CallDetails) -> C.Tag -> C.OpArray -> [OpContext] -> CallState
+  StartRequest :: Ptr C.Call -> C.CallDetails -> C.MetadataArray -> C.Tag -> IO () -> CallState
+  ReceivePayload :: U.ServerCall -> C.Tag -> C.OpArray -> [OpContext] -> IO () -> CallState
+  AcknowledgeResponse :: C.Tag -> C.OpArray -> [OpContext] -> IO () -> CallState
 
 lookupCall :: AsyncServer -> C.Tag -> IO (Maybe (CallState))
 lookupCall s t = HashMap.lookup t <$> readIORef (inProgressRequests s)
