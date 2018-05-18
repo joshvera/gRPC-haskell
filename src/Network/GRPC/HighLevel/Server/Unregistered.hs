@@ -35,8 +35,8 @@ import Data.ByteString (ByteString)
 import Foreign.Ptr (nullPtr)
 import qualified Foreign.Marshal.Alloc as C
 
-processCallData :: AsyncServer -> CallState -> Maybe C.Event -> [Handler 'Normal] -> IO (Async (Either GRPCIOError (CallState)))
-processCallData server callState event allHandlers = case callState of
+runCallState :: AsyncServer -> CallState -> Maybe C.Event -> [Handler 'Normal] -> IO (Async (Either GRPCIOError ()))
+runCallState server callState event allHandlers = case callState of
   Listen -> do
     tag' <- newTag (serverCallQueue server)
     grpcDebug ("Creating tag" ++ show tag')
@@ -50,12 +50,12 @@ processCallData server callState event allHandlers = case callState of
       C.CallOk -> do
         let state = StartRequest (callPtr, metadataPtr, callDetails) metadata tag'
         insertCall server tag' state
-        async (pure (Right state))
+        async (pure (Right ()))
       other -> async (pure (Left (GRPCIOCallError other)))
 
   (StartRequest pointers@(callPtr, _, callDetails) metadata tag) -> do
     grpcDebug ("Processing tag" ++ show tag)
-    nextCallAsync <- processCallData server Listen Nothing allHandlers
+    nextCallAsync <- runCallState server Listen Nothing allHandlers
     nextCall <- wait nextCallAsync
 
     case nextCall of
@@ -69,12 +69,13 @@ processCallData server callState event allHandlers = case callState of
           <*> (Host       <$> C.callDetailsGetHost     callDetails)
 
         grpcDebug "Send initial metadata"
-        async $ runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag [ OpSendInitialMetadata (U.metadata serverCall), OpRecvMessage ] $ \(array, contexts) -> do
+        let operations = [ OpSendInitialMetadata (U.metadata serverCall), OpRecvMessage ]
+        value <- runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array, contexts) -> do
           grpcDebug "Creating a message result"
           let state = ReceivePayload serverCall pointers tag array contexts
           replaceCall server tag state
           grpcDebug "Set a message result"
-          pure state
+        async (pure value)
       Left other -> async (pure (Left other))
   (ReceivePayload serverCall pointers tag array contexts) -> do
     grpcDebug ("Received payload with tag" ++ show tag)
@@ -97,7 +98,7 @@ processCallData server callState event allHandlers = case callState of
         runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array, contexts) -> do
           let state = AcknowledgeResponse serverCall pointers tag array contexts
           replaceCall server tag state
-          pure state
+          pure ()
     where
       findHandler sc = find ((== U.callMethod sc) . handlerMethodName)
   (AcknowledgeResponse serverCall (callPtr, metadataPtr, callDetails) tag array contexts) -> do
@@ -108,7 +109,7 @@ processCallData server callState event allHandlers = case callState of
     C.free callPtr
     deleteCall server tag
 
-    async (pure (Right Finish))
+    async (pure (Right ()))
 
 dispatchLoop :: Server
              -> (String -> IO ())
@@ -164,7 +165,7 @@ asyncDispatchLoop :: AsyncServer
              -> [Handler 'BiDiStreaming]
              -> IO ()
 asyncDispatchLoop s logger md hN hC hS hB = do
-  initialCallDataAsync <- processCallData s Listen Nothing hN-- C.grpcServerRequestCall >> returns (Process ServerCall)
+  initialCallDataAsync <- runCallState s Listen Nothing hN-- C.grpcServerRequestCall >> returns (Process ServerCall)
   initialCallData <- wait initialCallDataAsync
   case initialCallData of
 
@@ -177,7 +178,7 @@ asyncDispatchLoop s logger md hN hC hS hB = do
             Right event -> do
               clientCallData <- lookupCall s (C.eventTag event)
               case clientCallData of
-                Just callData -> processCallData s callData (Just event) hN
+                Just callData -> runCallState s callData (Just event) hN
                 Nothing -> async (error "Failed to lookup call data")
             Left err -> async (error ("Failed to fetch event" ++ show err))
         clientLoop = forever $ do
@@ -186,7 +187,7 @@ asyncDispatchLoop s logger md hN hC hS hB = do
             Right event -> do
               clientCallData <- lookupCall s (C.eventTag event)
               case clientCallData of
-                Just callData -> processCallData s callData (Just event) hN
+                Just callData -> runCallState s callData (Just event) hN
                 Nothing -> async (error "Failed to lookup call data")
             Left err -> async (error ("Failed to fetch event" ++ show err))
 
