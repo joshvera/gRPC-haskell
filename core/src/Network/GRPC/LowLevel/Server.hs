@@ -86,10 +86,7 @@ data AsyncServer = AsyncServer
   -- ^ CQ used for receiving new calls.
   , serverOpsQueue       :: CompletionQueue
   -- ^ CQ for running or reading ops on calls. Not used to receive new calls.
-  , normalMethods        :: [RegisteredMethod 'Normal]
-  , sstreamingMethods    :: [RegisteredMethod 'ServerStreaming]
-  , cstreamingMethods    :: [RegisteredMethod 'ClientStreaming]
-  , bidiStreamingMethods :: [RegisteredMethod 'BiDiStreaming]
+  , normalAsyncMethods        :: [RegisteredMethod 'Normal]
   , serverConfig         :: ServerConfig
   , outstandingForks     :: TVar (S.Set ThreadId)
   , serverShuttingDown   :: TVar Bool
@@ -313,15 +310,12 @@ startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \
   -- TODO: change order of args so we can eta reduce.
   let endpoint = serverEndpoint config
   ns <- traverse (\nm -> serverRegisterMethodNormal server nm endpoint) methodsToRegisterNormal
-  ss <- traverse (\nm -> serverRegisterMethodServerStreaming server nm endpoint) methodsToRegisterServerStreaming
-  cs <- traverse (\nm -> serverRegisterMethodClientStreaming server nm endpoint) methodsToRegisterClientStreaming
-  bs <- traverse (\nm -> serverRegisterMethodBiDiStreaming server nm endpoint) methodsToRegisterBiDiStreaming
 
   C.grpcServerStart server
   forks <- newTVarIO S.empty
   shutdown <- newTVarIO False
   inProgressRequests <- newIORef mempty
-  pure $ AsyncServer grpc server (Port actualPort) callQueue opsQueue ns ss cs bs config forks shutdown inProgressRequests
+  pure $ AsyncServer grpc server (Port actualPort) callQueue opsQueue ns config forks shutdown inProgressRequests
 
 stopAsyncServer :: AsyncServer -> IO ()
 -- TODO: Do method handles need to be freed?
