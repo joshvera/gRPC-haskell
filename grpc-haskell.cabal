@@ -45,6 +45,7 @@ library
     , unordered-containers >= 0.2 && <0.3
     , hashable
     , safe-exceptions
+    , unix
 
   exposed-modules:
     Network.GRPC.HighLevel

@@ -10,8 +10,11 @@
 module Network.GRPC.HighLevel.Server.Unregistered where
 
 import           Control.Arrow (left)
-import           Control.Concurrent.Async                  (async, wait, concurrently_, Async)
+import Control.Concurrent (myThreadId, threadDelay)
+import System.Exit (exitSuccess, ExitCode(..))
+import           Control.Concurrent.Async                  (async, wait, concurrently_, Async, cancel, race_, waitAnyCancel, waitBoth)
 import Control.Exception.Safe hiding (Handler)
+import Control.Exception (AsyncException(..))
 import           Control.Monad
 import           Data.Foldable                             (find)
 import           Network.GRPC.HighLevel.Server
@@ -29,6 +32,7 @@ import           Network.GRPC.LowLevel.CompletionQueue.Internal (newTag, Complet
 import           Network.GRPC.LowLevel.Op (runOpsAsync, resultFromOpContext, destroyOpArrayAndContexts, readAndDestroy)
 import Data.Maybe (catMaybes)
 import qualified Foreign.Marshal.Alloc as C
+import qualified System.Posix.Signals as P
 
 data CallStateException = ImpossiblePayload String | NotFound C.Event | GRPCException GRPCIOError | UnknownHandler MethodName
   deriving (Show, Typeable)
@@ -115,12 +119,12 @@ asyncDispatchLoop :: AsyncServer
              -> [Handler 'ClientStreaming]
              -> [Handler 'ServerStreaming]
              -> [Handler 'BiDiStreaming]
-             -> IO ()
+             -> IO (Async (), Async ())
 asyncDispatchLoop s logger md hN _ _ _ = do
   wait <$> runCallState s Listen hN
-  loop (serverCallQueue s) (Just 1) `concurrently_` loop (serverOpsQueue s) Nothing
+  (,) <$> loop (serverCallQueue s) (Just 1) <*> loop (serverOpsQueue s) (Just 1)
   where
-    loop queue timeout = forever $ do
+    loop queue timeout = async . forever $ do
       eitherEvent <- next queue timeout
       case eitherEvent of
         Right event -> do
@@ -134,16 +138,24 @@ asyncServerLoop :: ServerOptions -> IO ()
 asyncServerLoop ServerOptions{..} = do
   -- We run the loop in a new thread so that we can kill the serverLoop thread.
   -- Without this fork, we block on a foreign call, which can't be interrupted.
-  tid <- async $ withGRPC $ \grpc ->
-    withAsyncServer grpc config $ \server -> do
-      asyncDispatchLoop server
-                   optLogger
-                   optInitialMetadata
-                   optNormalHandlers
-                   optClientStreamHandlers
-                   optServerStreamHandlers
-                   optBiDiStreamHandlers
-  wait tid
+  mainId <- myThreadId
+  P.installHandler P.sigTERM (P.Catch $ throwTo mainId UserInterrupt) Nothing
+
+  withGRPC $ \grpc -> do
+    server <- startAsyncServer grpc config
+    (callLoop, opsLoop) <- asyncDispatchLoop server
+                 optLogger
+                 optInitialMetadata
+                 optNormalHandlers
+                 optClientStreamHandlers
+                 optServerStreamHandlers
+                 optBiDiStreamHandlers
+
+    void (waitBoth callLoop opsLoop)
+      `catchAsync` (\UserInterrupt -> cancel callLoop >> cancel opsLoop)
+      `finally` (stopAsyncServer server)
+
+
   where
     config = ServerConfig
       { host                             = optServerHost
