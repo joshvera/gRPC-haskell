@@ -9,7 +9,7 @@
 
 module Network.GRPC.HighLevel.Server.Unregistered where
 
-import           Control.Arrow
+import           Control.Arrow (left)
 import           Control.Concurrent.Async                  (async, wait, concurrently_, Async)
 import qualified Control.Exception.Safe                         as CE
 import           Control.Monad
@@ -162,7 +162,7 @@ asyncDispatchLoop :: AsyncServer
              -> [Handler 'BiDiStreaming]
              -> IO ()
 asyncDispatchLoop s logger md hN hC hS hB = do
-  initialCallDataAsync <- wait <$> runCallState s Listen hN
+  wait <$> runCallState s Listen hN
   loop (serverCallQueue s) (Just 1) `concurrently_` loop (serverOpsQueue s) Nothing
   where
     loop queue timeout = forever $ do
