@@ -31,7 +31,7 @@ import           Network.GRPC.LowLevel.Op (runOpsAsync, resultFromOpContext, tea
 import Data.Maybe (catMaybes)
 import qualified Foreign.Marshal.Alloc as C
 
-data CallStateException = ImpossiblePayload String | NotFound C.Event | GRPCException GRPCIOError
+data CallStateException = ImpossiblePayload String | NotFound C.Event | GRPCException GRPCIOError | UnknownHandler MethodName
   deriving (Show, CE.Typeable)
 
 instance CE.Exception CallStateException
@@ -78,10 +78,8 @@ runCallState server callState allHandlers = case callState of
     teardownOpArrayAndContexts array contexts -- Safe to teardown after calling 'resultFromOpContext'.
     grpcDebug "ReceivePayload: Received MessageResult"
     -- TODO bracket this call
-    let normalHandler =
-          case findHandler serverCall allHandlers of
-            Just (UnaryHandler a b) -> UnaryHandler a b
-    let f call string =
+    normalHandler <- maybe (CE.throw $ UnknownHandler (U.callMethod serverCall)) pure (findHandler serverCall allHandlers)
+    let f _ string =
           case normalHandler of
             (UnaryHandler _ handler) -> convertServerHandler handler (const string <$> U.convertCall serverCall)
 
