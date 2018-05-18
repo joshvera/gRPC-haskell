@@ -11,13 +11,12 @@ module Network.GRPC.HighLevel.Server.Unregistered where
 
 import           Control.Arrow (left)
 import           Control.Concurrent.Async                  (async, wait, concurrently_, Async)
-import qualified Control.Exception.Safe                         as CE
+import Control.Exception.Safe hiding (Handler)
 import           Control.Monad
 import           Data.Foldable                             (find)
 import           Network.GRPC.HighLevel.Server
 import           Network.GRPC.LowLevel
 import           Network.GRPC.LowLevel.GRPC (grpcDebug)
-import Network.GRPC.LowLevel.Call   (mgdPtr)
 import qualified Network.GRPC.LowLevel.Call.Unregistered   as U
 import qualified Network.GRPC.LowLevel.Server.Unregistered as U
 import Network.GRPC.LowLevel.Server
@@ -32,9 +31,9 @@ import Data.Maybe (catMaybes)
 import qualified Foreign.Marshal.Alloc as C
 
 data CallStateException = ImpossiblePayload String | NotFound C.Event | GRPCException GRPCIOError | UnknownHandler MethodName
-  deriving (Show, CE.Typeable)
+  deriving (Show, Typeable)
 
-instance CE.Exception CallStateException
+instance Exception CallStateException
 
 runCallState :: AsyncServer -> CallState -> [Handler 'Normal] -> IO (Async ())
 runCallState server callState allHandlers = case callState of
@@ -51,7 +50,7 @@ runCallState server callState allHandlers = case callState of
       C.CallOk -> do
         let state = StartRequest (callPtr, metadataPtr, callDetails) metadata tag'
         insertCall server tag' state
-      other -> CE.throw (GRPCIOCallError other)
+      other -> throw (GRPCIOCallError other)
 
   (StartRequest pointers@(callPtr, _, callDetails) metadata tag) -> do
     grpcDebug ("Processing tag" ++ show tag)
@@ -74,11 +73,11 @@ runCallState server callState allHandlers = case callState of
 
   (ReceivePayload serverCall pointers tag array contexts) -> do
     grpcDebug ("ReceivePayload: Received payload with tag" ++ show tag)
-    payload <- Right . catMaybes <$> traverse resultFromOpContext contexts
-    teardownOpArrayAndContexts array contexts -- Safe to teardown after calling 'resultFromOpContext'.
+    payload <- Right . catMaybes <$> (traverse resultFromOpContext contexts)
+      `finally` teardownOpArrayAndContexts array contexts -- Safe to teardown after calling 'resultFromOpContext'.
     grpcDebug "ReceivePayload: Received MessageResult"
     -- TODO bracket this call
-    normalHandler <- maybe (CE.throw $ UnknownHandler (U.callMethod serverCall)) pure (findHandler serverCall allHandlers)
+    normalHandler <- maybe (throw $ UnknownHandler (U.callMethod serverCall)) pure (findHandler serverCall allHandlers)
     let f _ string =
           case normalHandler of
             (UnaryHandler _ handler) -> convertServerHandler handler (const string <$> U.convertCall serverCall)
@@ -94,8 +93,8 @@ runCallState server callState allHandlers = case callState of
           replaceCall server tag state
       Left x -> do
         grpcDebug "ReceivePayload: ops failed; aborting"
-        CE.throw (GRPCException x)
-      rest -> CE.throw (ImpossiblePayload $ "ReceivePayload: Impossible payload result: " ++ show rest)
+        throw (GRPCException x)
+      rest -> throw (ImpossiblePayload $ "ReceivePayload: Impossible payload result: " ++ show rest)
     where
       findHandler sc = find ((== U.callMethod sc) . handlerMethodName)
   (AcknowledgeResponse serverCall (callPtr, metadataPtr, callDetails) tag array contexts) -> do
@@ -126,8 +125,8 @@ asyncDispatchLoop s logger md hN _ _ _ = do
           clientCallData <- lookupCall s (C.eventTag event)
           case clientCallData of
             Just callData -> runCallState s callData hN
-            Nothing -> async (CE.throw $ NotFound event)
-        Left err -> async (CE.throw err)
+            Nothing -> async (throw $ NotFound event)
+        Left err -> async (throw err)
 
 asyncServerLoop :: ServerOptions -> IO ()
 asyncServerLoop ServerOptions{..} = do
@@ -202,8 +201,8 @@ dispatchLoop s logger md hN hC hS hB =
       return (mempty, mempty, StatusNotFound, StatusDetails "unknown method")
 
     handleError :: IO a -> IO ()
-    handleError = (handleCallError logger . left herr =<<) . CE.try
-      where herr (e :: CE.SomeException) = GRPCIOHandlerException (show e)
+    handleError = (handleCallError logger . left herr =<<) . try
+      where herr (e :: SomeException) = GRPCIOHandlerException (show e)
 
 serverLoop :: ServerOptions -> IO ()
 serverLoop ServerOptions{..} = do
