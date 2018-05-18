@@ -74,7 +74,7 @@ runCallState server callState allHandlers = case callState of
 
   (ReceivePayload serverCall pointers tag array contexts) -> do
     grpcDebug ("ReceivePayload: Received payload with tag" ++ show tag)
-    payload <- fmap (Right . catMaybes) $ mapM resultFromOpContext contexts
+    payload <- Right . catMaybes <$> traverse resultFromOpContext contexts
     teardownOpArrayAndContexts array contexts -- Safe to teardown after calling 'resultFromOpContext'.
     grpcDebug "ReceivePayload: Received MessageResult"
     -- TODO bracket this call
