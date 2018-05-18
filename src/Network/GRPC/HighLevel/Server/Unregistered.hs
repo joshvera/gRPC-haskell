@@ -11,7 +11,7 @@ module Network.GRPC.HighLevel.Server.Unregistered where
 
 import           Control.Arrow
 import           Control.Concurrent.Async                  (async, wait, concurrently_, Async)
-import qualified Control.Exception                         as CE
+import qualified Control.Exception.Safe                         as CE
 import           Control.Monad
 import           Data.Foldable                             (find)
 import           Network.GRPC.HighLevel.Server
@@ -31,7 +31,16 @@ import           Network.GRPC.LowLevel.Op (runOpsAsync, resultFromOpContext, tea
 import Data.Maybe (catMaybes)
 import qualified Foreign.Marshal.Alloc as C
 
-runCallState :: AsyncServer -> CallState -> [Handler 'Normal] -> IO (Async (Either GRPCIOError ()))
+data CallStateException = ImpossiblePayload String | NotFound C.Event | GRPCException GRPCIOError
+  deriving (Show, CE.Typeable)
+
+instance CE.Exception CallStateException
+
+-- Error handling
+-- Cancelling asyncs
+-- Server shutdown
+
+runCallState :: AsyncServer -> CallState -> [Handler 'Normal] -> IO (Async ())
 runCallState server callState allHandlers = case callState of
   Listen -> do
     tag' <- newTag (serverCallQueue server)
@@ -42,53 +51,49 @@ runCallState server callState allHandlers = case callState of
     callDetails <- C.createCallDetails
     callError <- C.grpcServerRequestCall (unsafeServer (server :: AsyncServer)) callPtr callDetails metadata (unsafeCQ . serverOpsQueue $ server) (unsafeCQ . serverCallQueue $ server) tag'
 
-    case callError of
+    async $ case callError of
       C.CallOk -> do
         let state = StartRequest (callPtr, metadataPtr, callDetails) metadata tag'
         insertCall server tag' state
-        async (pure (Right ()))
-      other -> async (pure (Left (GRPCIOCallError other)))
+        pure ()
+      other -> CE.throw (GRPCIOCallError other)
 
   (StartRequest pointers@(callPtr, _, callDetails) metadata tag) -> do
     grpcDebug ("Processing tag" ++ show tag)
-    nextCallAsync <- runCallState server Listen allHandlers
-    nextCall <- wait nextCallAsync
+    _ <- wait <$> runCallState server Listen allHandlers
+    serverCall <- U.ServerCall
+      <$> peek callPtr
+      <*> pure (serverOpsQueue server)
+      <*> C.getAllMetadataArray metadata
+      <*> (C.timeSpec <$> C.callDetailsGetDeadline callDetails)
+      <*> (MethodName <$> C.callDetailsGetMethod   callDetails)
+      <*> (Host       <$> C.callDetailsGetHost     callDetails)
 
-    case nextCall of
-      Right callState -> do
-        serverCall <- U.ServerCall
-          <$> peek callPtr
-          <*> pure (serverOpsQueue server)
-          <*> C.getAllMetadataArray metadata
-          <*> (C.timeSpec <$> C.callDetailsGetDeadline callDetails)
-          <*> (MethodName <$> C.callDetailsGetMethod   callDetails)
-          <*> (Host       <$> C.callDetailsGetHost     callDetails)
+    grpcDebug "Send initial metadata"
+    let operations = [ OpSendInitialMetadata (U.metadata serverCall), OpRecvMessage ]
+    async $ runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array, contexts) -> do
+      grpcDebug "Creating a message result"
+      let state = ReceivePayload serverCall pointers tag array contexts
+      replaceCall server tag state
+      grpcDebug "Set a message result"
+      pure ()
 
-        grpcDebug "Send initial metadata"
-        let operations = [ OpSendInitialMetadata (U.metadata serverCall), OpRecvMessage ]
-        value <- runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array, contexts) -> do
-          grpcDebug "Creating a message result"
-          let state = ReceivePayload serverCall pointers tag array contexts
-          replaceCall server tag state
-          grpcDebug "Set a message result"
-        async (pure value)
-      Left other -> async (pure (Left other))
   (ReceivePayload serverCall pointers tag array contexts) -> do
-    grpcDebug ("Received payload with tag" ++ show tag)
+    grpcDebug ("ReceivePayload: Received payload with tag" ++ show tag)
     payload <- fmap (Right . catMaybes) $ mapM resultFromOpContext contexts
     teardownOpArrayAndContexts array contexts -- Safe to teardown after calling 'resultFromOpContext'.
-    grpcDebug "Received MessageResult"
+    grpcDebug "ReceivePayload: Received MessageResult"
     -- TODO bracket this call
     let normalHandler =
           case findHandler serverCall allHandlers of
             Just (UnaryHandler a b) -> UnaryHandler a b
-    let f = \_sc' bs ->
+    let f call string =
           case normalHandler of
-            (UnaryHandler _ handler) -> convertServerHandler handler (const bs <$> U.convertCall serverCall)
+            (UnaryHandler _ handler) -> convertServerHandler handler (const string <$> U.convertCall serverCall)
 
     async $ case payload of
       Right [OpRecvMessageResult (Just body)] -> do
-        grpcDebug ("Received payload:" ++ show body)
+        grpcDebug ("ReceivePayload: Received payload:" ++ show body)
 
         (rsp, trailMeta, st, ds) <- f serverCall body
         let operations = [ OpRecvCloseOnServer , OpSendMessage rsp, OpSendStatusFromServer trailMeta st ds ]
@@ -96,6 +101,10 @@ runCallState server callState allHandlers = case callState of
           let state = AcknowledgeResponse pointers tag array contexts
           replaceCall server tag state
           pure ()
+      Left x -> do
+        grpcDebug "ReceivePayload: ops failed; aborting"
+        CE.throw (GRPCException x)
+      rest -> CE.throw (ImpossiblePayload $ "ReceivePayload: Impossible payload result: " ++ show rest)
     where
       findHandler sc = find ((== U.callMethod sc) . handlerMethodName)
   (AcknowledgeResponse (callPtr, metadataPtr, callDetails) tag array contexts) -> do
@@ -105,7 +114,7 @@ runCallState server callState allHandlers = case callState of
     C.free callPtr
     deleteCall server tag
 
-    async (pure (Right ()))
+    async (pure ())
 
 dispatchLoop :: Server
              -> (String -> IO ())
@@ -161,33 +170,18 @@ asyncDispatchLoop :: AsyncServer
              -> [Handler 'BiDiStreaming]
              -> IO ()
 asyncDispatchLoop s logger md hN hC hS hB = do
-  initialCallDataAsync <- runCallState s Listen hN
-  initialCallData <- wait initialCallDataAsync
-  case initialCallData of
-
-    Right callData -> do
-      serverLoop `concurrently_` clientLoop
-      where
-        serverLoop = forever $ do
-          eitherEvent <- next (serverCallQueue s) Nothing
-          case eitherEvent of
-            Right event -> do
-              clientCallData <- lookupCall s (C.eventTag event)
-              case clientCallData of
-                Just callData -> runCallState s callData hN
-                Nothing -> async (error "Failed to lookup call data")
-            Left err -> async (error ("Failed to fetch event" ++ show err))
-        clientLoop = forever $ do
-          eitherEvent <- next (serverOpsQueue s) Nothing
-          case eitherEvent of
-            Right event -> do
-              clientCallData <- lookupCall s (C.eventTag event)
-              case clientCallData of
-                Just callData -> runCallState s callData hN
-                Nothing -> async (error "Failed to lookup call data")
-            Left err -> async (error ("Failed to fetch event" ++ show err))
-
-    Left err -> error ("failed to create initial call data" ++ show err)
+  initialCallDataAsync <- wait <$> runCallState s Listen hN
+  loop (serverCallQueue s) (Just 1) `concurrently_` loop (serverOpsQueue s) Nothing
+  where
+    loop queue timeout = forever $ do
+      eitherEvent <- next queue timeout
+      case eitherEvent of
+        Right event -> do
+          clientCallData <- lookupCall s (C.eventTag event)
+          case clientCallData of
+            Just callData -> runCallState s callData hN
+            Nothing -> async (CE.throw $ NotFound event)
+        Left err -> async (CE.throw err)
 
 serverLoop :: ServerOptions -> IO ()
 serverLoop ServerOptions{..} = do

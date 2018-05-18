@@ -3,7 +3,7 @@
 
 module Network.GRPC.LowLevel.Server.Unregistered where
 
-import           Control.Exception                                  (finally)
+import Control.Exception.Safe
 import           Control.Monad
 import           Control.Monad.Trans.Except
 import           Data.ByteString                                    (ByteString)

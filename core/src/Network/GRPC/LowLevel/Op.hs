@@ -6,7 +6,7 @@
 
 module Network.GRPC.LowLevel.Op where
 
-import           Control.Exception
+import           Control.Exception.Safe
 import           Control.Monad
 import           Control.Monad.Trans.Except
 import           Data.ByteString                       (ByteString)
@@ -237,7 +237,7 @@ runOpsAsync :: C.Call
             -> ((C.OpArray, [OpContext]) -> IO b)
             -- ^ A function that yields allocated OpArray and OpContexts.
             -- You are responsible for freeing these with 'teardownOpArrayAndContexts'.
-            -> IO (Either GRPCIOError b)
+            -> IO b
 runOpsAsync call cq tag ops fun =
   let l = length ops in do
     (opArray, contexts) <- allocOpArrayAndCtxs ops
@@ -248,8 +248,8 @@ runOpsAsync call cq tag ops fun =
     callError <- startBatch cq call opArray l tag
     grpcDebug "runOpsAsync: called start_batch."
     case callError of
-      Left x -> grpcDebug ("runOpsAsync: callError:" ++ show callError) >> return (Left x)
-      Right () -> pure (Right value)
+      Left x -> grpcDebug ("runOpsAsync: callError:" ++ show callError) >> throw x
+      Right () -> pure value
 
 teardownOpArrayAndContexts array contexts = do
   C.opArrayDestroy array (length contexts)
