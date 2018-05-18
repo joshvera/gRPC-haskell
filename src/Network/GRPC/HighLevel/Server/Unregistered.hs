@@ -80,6 +80,7 @@ runCallState server callState event allHandlers = case callState of
   (ReceivePayload serverCall pointers tag array contexts) -> do
     grpcDebug ("Received payload with tag" ++ show tag)
     payload <- fmap (Right . catMaybes) $ mapM resultFromOpContext contexts
+    teardownOpArrayAndContexts array contexts -- Safe to teardown after calling 'resultFromOpContext'.
     grpcDebug "Received MessageResult"
     -- TODO bracket this call
     let normalHandler =
@@ -102,8 +103,6 @@ runCallState server callState event allHandlers = case callState of
     where
       findHandler sc = find ((== U.callMethod sc) . handlerMethodName)
   (AcknowledgeResponse serverCall (callPtr, metadataPtr, callDetails) tag array contexts) -> do
-
-    teardownOpArrayAndContexts array contexts
     C.metadataArrayDestroy metadataPtr
     C.destroyCallDetails callDetails
     C.free callPtr
