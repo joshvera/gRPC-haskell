@@ -5,6 +5,7 @@
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 module Network.GRPC.HighLevel.Server.Unregistered where
 
@@ -34,16 +35,16 @@ import Data.ByteString (ByteString)
 import Foreign.Ptr (nullPtr)
 import qualified Foreign.Marshal.Alloc as C
 
-processCallData :: Server -> CallState -> Maybe C.Event -> [Handler 'Normal] -> IO (Async (Either GRPCIOError (CallState)))
+processCallData :: AsyncServer -> CallState -> Maybe C.Event -> [Handler 'Normal] -> IO (Async (Either GRPCIOError (CallState)))
 processCallData server callState event allHandlers = case callState of
   Listen -> do
-    tag' <- newTag (serverCQ server)
+    tag' <- newTag (serverCallQueue server)
     grpcDebug ("Creating tag" ++ show tag')
     callPtr <- C.malloc
     metadataPtr <- C.metadataArrayCreate
     metadata  <- peek metadataPtr
     callDetails <- C.createCallDetails
-    callError <- C.grpcServerRequestCall (unsafeServer server) callPtr callDetails metadata (unsafeCQ . serverCallCQ $ server) (unsafeCQ . serverCQ $ server) tag'
+    callError <- C.grpcServerRequestCall (unsafeServer (server :: AsyncServer)) callPtr callDetails metadata (unsafeCQ . serverOpsQueue $ server) (unsafeCQ . serverCallQueue $ server) tag'
 
     case callError of
       C.CallOk -> do
@@ -61,7 +62,7 @@ processCallData server callState event allHandlers = case callState of
       Right callState -> do
         serverCall <- U.ServerCall
           <$> peek callPtr
-          <*> return (serverCallCQ server)
+          <*> pure (serverOpsQueue server)
           <*> C.getAllMetadataArray metadata
           <*> (C.timeSpec <$> C.callDetailsGetDeadline callDetails)
           <*> (MethodName <$> C.callDetailsGetMethod   callDetails)
@@ -171,7 +172,7 @@ asyncDispatchLoop s logger md hN hC hS hB = do
       serverLoop `concurrently_` clientLoop
       where
         serverLoop = forever $ do
-          eitherEvent <- next (serverCQ s) Nothing
+          eitherEvent <- next (serverCallQueue s) Nothing
           case eitherEvent of
             Right event -> do
               clientCallData <- lookupCall s (C.eventTag event)
@@ -180,7 +181,7 @@ asyncDispatchLoop s logger md hN hC hS hB = do
                 Nothing -> async (error "Failed to lookup call data")
             Left err -> async (error ("Failed to fetch event" ++ show err))
         clientLoop = forever $ do
-          eitherEvent <- next (serverCallCQ s) Nothing
+          eitherEvent <- next (serverOpsQueue s) Nothing
           case eitherEvent of
             Right event -> do
               clientCallData <- lookupCall s (C.eventTag event)
@@ -228,7 +229,7 @@ asyncServerLoop ServerOptions{..} = do
   -- Without this fork, we block on a foreign call, which can't be interrupted.
   tid <- async $ withGRPC $ \grpc ->
     withAsyncServer grpc config $ \server -> do
-      dispatchLoop server
+      asyncDispatchLoop server
                    optLogger
                    optInitialMetadata
                    optNormalHandlers
