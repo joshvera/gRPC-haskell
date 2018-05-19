@@ -79,10 +79,10 @@ runCallState server callState allHandlers = case callState of
           other -> do
             grpcDebug $ "grpcServerRequestCall: Call Error" ++ show other
             throw (GRPCIOCallError other)
-    go `onException` cleanup
-    async (pure ())
+    async (go `onException` cleanup)
 
   StartRequest callPtr callDetails metadata tag cleanup -> do
+    wait <$> runCallState server Listen allHandlers
     grpcDebug ("StartRequest: runnin operations for tag" ++ show tag)
     serverCall <- U.ServerCall
       <$> peek callPtr
@@ -150,19 +150,6 @@ asyncDispatchLoop s logger md hN _ _ _ = do
         Right event -> do
           clientCallData <- lookupCall s (C.eventTag event)
           case clientCallData of
-            Just callData@(StartRequest _ _ _ _ _) -> do
-              _ <- wait <$> runCallState s Listen hN
-              ready <- newTVarIO False
-              asyncCall <- async $ do
-                atomically (check =<< readTVar ready)
-                tid <- myThreadId
-                asyncCall <- runCallState s callData hN
-                wait asyncCall `finally` cleanup tid
-
-              atomically $ do
-                modifyTVar' (outstandingCallStates s) (Map.insert (asyncThreadId asyncCall) asyncCall)
-                modifyTVar' ready (const True)
-              where cleanup tid = atomically $ modifyTVar' (outstandingCallStates s) (Map.delete tid)
             Just callData -> do
               ready <- newTVarIO False
               asyncCall <- async $ do

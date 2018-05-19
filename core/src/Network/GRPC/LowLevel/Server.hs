@@ -21,12 +21,12 @@ import           Control.Concurrent                    (ThreadId
                                                         , myThreadId
                                                         , killThread)
 import           Control.Concurrent.STM                (atomically
-                                                        , check)
+                                                        , check, STM)
 import           Control.Concurrent.STM.TVar           (TVar
                                                         , modifyTVar'
                                                         , readTVar
-                                                        , writeTVar
                                                         , readTVarIO
+                                                        , writeTVar
                                                         , newTVarIO)
 import           Control.Exception                     (bracket, finally)
 import           Control.Monad
@@ -55,6 +55,7 @@ import qualified Network.GRPC.Unsafe.Security          as C
 import qualified Data.HashMap.Strict as HashMap
 import Data.HashMap.Strict (HashMap)
 import Data.Map.Strict (Map)
+import Data.Maybe (isJust)
 import qualified Data.Map.Strict as Map
 import qualified Network.GRPC.LowLevel.Call.Unregistered  as U
 import Foreign.Ptr (Ptr)
@@ -94,7 +95,7 @@ data AsyncServer = AsyncServer
   , serverConfig          :: ServerConfig
   , outstandingCallStates :: TVar (Map ThreadId (Async ()))
   , serverShuttingDown    :: TVar Bool
-  , inProgressRequests    :: IORef (HashMap C.Tag CallState)
+  , inProgressRequests    :: TVar (HashMap C.Tag CallState)
   }
 
 data CallState where
@@ -103,23 +104,24 @@ data CallState where
   ReceivePayload :: U.ServerCall -> C.Tag -> C.OpArray -> [OpContext] -> IO () -> CallState
   AcknowledgeResponse :: C.Tag -> C.OpArray -> [OpContext] -> IO () -> CallState
 
-lookupCall :: AsyncServer -> C.Tag -> IO (Maybe (CallState))
-lookupCall s t = HashMap.lookup t <$> readIORef (inProgressRequests s)
+lookupCall :: AsyncServer -> C.Tag -> IO (Maybe CallState)
+lookupCall s t = atomically $ do
+  states <- readTVar (inProgressRequests s)
+  let state = HashMap.lookup t states
+  check (isJust state)
+  pure state
 
 
 insertCall :: AsyncServer -> C.Tag -> CallState -> IO ()
-insertCall s t state =
-  atomicModifyIORef' (inProgressRequests s) (\a -> (HashMap.insert t state a, ()))
+insertCall s t state = atomically $ modifyTVar' (inProgressRequests s) (HashMap.insert t state)
 
 
 replaceCall :: AsyncServer -> C.Tag -> CallState -> IO ()
-replaceCall s t state =
-    atomicModifyIORef' (inProgressRequests s) (\a -> (HashMap.insert t state a, ()))
+replaceCall s t state = atomically $ modifyTVar' (inProgressRequests s) (HashMap.insert t state)
 
 
 deleteCall :: AsyncServer -> C.Tag -> IO ()
-deleteCall s t =
-  atomicModifyIORef' (inProgressRequests s) (\a -> (HashMap.delete t a, ()))
+deleteCall s t = atomically $ modifyTVar' (inProgressRequests s) (HashMap.delete t)
 
 -- TODO: should we make a forkGRPC function instead? I am not sure if it would
 -- be safe to let the call handlers threads keep running after the server stops,
@@ -318,7 +320,7 @@ startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \
   C.grpcServerStart server
   forks <- newTVarIO mempty
   shutdown <- newTVarIO False
-  inProgressRequests <- newIORef mempty
+  inProgressRequests <- newTVarIO mempty
   pure $ AsyncServer grpc server (Port actualPort) callQueue opsQueue ns config forks shutdown inProgressRequests
 
 stopAsyncServer :: AsyncServer -> IO ()
