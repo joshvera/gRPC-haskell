@@ -74,7 +74,8 @@ runCallState server callState allHandlers = case callState of
                other -> throw (GRPCIOCallError other)
 
     async (go `onException` cleanup)
-  (StartRequest callPtr callDetails metadata tag cleanup) -> do
+
+  StartRequest callPtr callDetails metadata tag cleanup -> do
     _ <- wait <$> runCallState server Listen allHandlers
 
     serverCall <- U.ServerCall
@@ -93,7 +94,7 @@ runCallState server callState allHandlers = case callState of
         replaceCall server tag state `onException` destroyOpArrayAndContexts array contexts
     async (sendOps `onException` cleanup')
 
-  (ReceivePayload serverCall tag array contexts cleanup) -> do
+  ReceivePayload serverCall tag array contexts cleanup -> do
     payload <- readAndDestroy array contexts
     grpcDebug "ReceivePayload: Received MessageResult"
     normalHandler <- maybe (throw $ UnknownHandler (U.callMethod serverCall)) pure (findHandler serverCall allHandlers)
@@ -103,7 +104,7 @@ runCallState server callState allHandlers = case callState of
       findHandler sc = find ((== U.callMethod sc) . handlerMethodName)
       f normalHandler string =
         case normalHandler of
-          (UnaryHandler _ handler) -> convertServerHandler handler (const string <$> U.convertCall serverCall)
+          UnaryHandler _ handler -> convertServerHandler handler (const string <$> U.convertCall serverCall)
       callHandler normalHandler = \case
         [OpRecvMessageResult (Just body)] -> do
           grpcDebug ("ReceivePayload: Received payload:" ++ show body)
@@ -115,7 +116,8 @@ runCallState server callState allHandlers = case callState of
             let state = AcknowledgeResponse tag array' contexts' cleanup
             replaceCall server tag state `onException` destroyOpArrayAndContexts array' contexts'
         rest -> throw (ImpossiblePayload $ "ReceivePayload: Impossible payload result: " ++ show rest)
-  (AcknowledgeResponse tag array contexts cleanup) -> do
+
+  AcknowledgeResponse tag array contexts cleanup -> do
     destroyOpArrayAndContexts array contexts -- Safe to teardown after calling 'resultFromOpContext'.
     deleteCall server tag `finally` cleanup
     async (pure ())
