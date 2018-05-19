@@ -58,6 +58,8 @@ import qualified Network.GRPC.LowLevel.Call.Unregistered  as U
 import Foreign.Ptr (Ptr)
 import qualified Network.GRPC.Unsafe.Metadata  as C
 import Data.IORef
+import Control.Concurrent.Async (Async, cancel, asyncThreadId)
+import Data.Foldable (traverse_)
 
 -- | Wraps various gRPC state needed to run a server.
 data Server = Server
@@ -79,18 +81,18 @@ data Server = Server
 
 -- | Wraps various gRPC state needed to run a server.
 data AsyncServer = AsyncServer
-  { serverGRPC           :: GRPC
-  , unsafeServer         :: C.Server
-  , listeningPort        :: Port
-  , serverCallQueue      :: CompletionQueue
+  { serverGRPC            :: GRPC
+  , unsafeServer          :: C.Server
+  , listeningPort         :: Port
+  , serverCallQueue       :: CompletionQueue
   -- ^ CQ used for receiving new calls.
-  , serverOpsQueue       :: CompletionQueue
+  , serverOpsQueue        :: CompletionQueue
   -- ^ CQ for running or reading ops on calls. Not used to receive new calls.
-  , normalAsyncMethods        :: [RegisteredMethod 'Normal]
-  , serverConfig         :: ServerConfig
-  , outstandingForks     :: TVar (S.Set ThreadId)
-  , serverShuttingDown   :: TVar Bool
-  , inProgressRequests   :: IORef (HashMap C.Tag CallState)
+  , normalAsyncMethods    :: [RegisteredMethod 'Normal]
+  , serverConfig          :: ServerConfig
+  , outstandingCallStates :: TVar (S.Set (Async ()))
+  , serverShuttingDown    :: TVar Bool
+  , inProgressRequests    :: IORef (HashMap C.Tag CallState)
   }
 
 data CallState where
@@ -325,7 +327,7 @@ stopAsyncServer AsyncServer{ unsafeServer = s, .. } = do
   shutdownNotify shutdownQueue
   shutdownCQ shutdownQueue
   grpcDebug "stopAsyncServer: cleaning up forks."
-  cleanupForks
+  cleanupOutstandingRequests
   grpcDebug "stopAsyncServer: call grpc_server_destroy."
   C.grpcServerDestroy s
   -- Queues must be shut down after the server is destroyed.
@@ -358,14 +360,14 @@ stopAsyncServer AsyncServer{ unsafeServer = s, .. } = do
               C.grpcServerCancelAllCalls s
             Left err              -> error ("Failed to stop server:" ++ show err)
             Right _             -> return ()
-        cleanupForks = do
+        cleanupOutstandingRequests = do
           atomically $ writeTVar serverShuttingDown True
-          liveForks <- readTVarIO outstandingForks
-          grpcDebug $ "Server shutdown: killing threads: " ++ show liveForks
-          mapM_ killThread liveForks
+          liveCalls <- readTVarIO outstandingCallStates
+          grpcDebug $ "Server shutdown: killing threads: " ++ show (S.map asyncThreadId liveCalls)
+          traverse_ cancel liveCalls
           -- wait for threads to shut down
           grpcDebug "Server shutdown: waiting until all threads are dead."
-          atomically $ check . (==0) . S.size =<< readTVar outstandingForks
+          atomically $ check . (==0) . S.size =<< readTVar outstandingCallStates
           grpcDebug "Server shutdown: All forks cleaned up."
 
 -- | Less precisely-typed registration function used in
