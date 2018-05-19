@@ -12,7 +12,7 @@ module Network.GRPC.HighLevel.Server.Unregistered where
 import           Control.Arrow (left)
 import Control.Concurrent (myThreadId, threadDelay)
 import System.Exit (exitSuccess, ExitCode(..))
-import           Control.Concurrent.Async                  (async, wait, concurrently_, Async, cancel, race_, waitAnyCancel, waitBoth)
+import           Control.Concurrent.Async                  (withAsync, async, wait, concurrently_, Async(..), cancel, race_, waitAnyCancel, waitBoth)
 import Control.Exception.Safe hiding (Handler)
 import qualified Control.Exception.Safe as E
 import Control.Exception (AsyncException(..), asyncExceptionFromException, asyncExceptionToException)
@@ -34,6 +34,8 @@ import           Network.GRPC.LowLevel.Op (runOpsAsync, resultFromOpContext, des
 import Data.Maybe (catMaybes)
 import qualified Foreign.Marshal.Alloc as C
 import qualified System.Posix.Signals as P
+import qualified Data.Map.Strict as Map
+import Control.Concurrent.STM
 
 data CallStateException = ImpossiblePayload String | NotFound C.Event | GRPCException GRPCIOError | UnknownHandler MethodName
   deriving (Show, Typeable)
@@ -140,9 +142,21 @@ asyncDispatchLoop s logger md hN _ _ _ = do
         Right event -> do
           clientCallData <- lookupCall s (C.eventTag event)
           case clientCallData of
-            Just callData -> runCallState s callData hN
-            Nothing -> async (throw $ NotFound event)
-        Left err -> async (throw err)
+            Just callData -> do
+              ready <- newTVarIO False
+              asyncCall <- async $ do
+                atomically (check =<< readTVar ready)
+                tid <- myThreadId
+                asyncCall <- runCallState s callData hN
+                wait asyncCall `finally` cleanup tid
+
+              atomically $ do
+                modifyTVar' (outstandingCallStates s) (Map.insert (asyncThreadId asyncCall) asyncCall)
+                modifyTVar' ready (const True)
+              where cleanup tid = atomically $ modifyTVar' (outstandingCallStates s) (Map.delete tid)
+            Nothing -> throw $ NotFound event
+        Left GRPCIOTimeout -> pure ()
+        Left err -> throw err
 
 asyncServerLoop :: ServerOptions -> IO ()
 asyncServerLoop ServerOptions{..} = do

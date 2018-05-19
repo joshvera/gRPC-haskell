@@ -54,6 +54,8 @@ import qualified Network.GRPC.Unsafe.Op                as C
 import qualified Network.GRPC.Unsafe.Security          as C
 import qualified Data.HashMap.Strict as HashMap
 import Data.HashMap.Strict (HashMap)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import qualified Network.GRPC.LowLevel.Call.Unregistered  as U
 import Foreign.Ptr (Ptr)
 import qualified Network.GRPC.Unsafe.Metadata  as C
@@ -90,7 +92,7 @@ data AsyncServer = AsyncServer
   -- ^ CQ for running or reading ops on calls. Not used to receive new calls.
   , normalAsyncMethods    :: [RegisteredMethod 'Normal]
   , serverConfig          :: ServerConfig
-  , outstandingCallStates :: TVar (S.Set (Async ()))
+  , outstandingCallStates :: TVar (Map ThreadId (Async ()))
   , serverShuttingDown    :: TVar Bool
   , inProgressRequests    :: IORef (HashMap C.Tag CallState)
   }
@@ -314,7 +316,7 @@ startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \
   ns <- traverse (\nm -> serverRegisterMethodNormal server nm endpoint) methodsToRegisterNormal
 
   C.grpcServerStart server
-  forks <- newTVarIO S.empty
+  forks <- newTVarIO mempty
   shutdown <- newTVarIO False
   inProgressRequests <- newIORef mempty
   pure $ AsyncServer grpc server (Port actualPort) callQueue opsQueue ns config forks shutdown inProgressRequests
@@ -326,7 +328,7 @@ stopAsyncServer AsyncServer{ unsafeServer = s, .. } = do
   shutdownQueue <- createCompletionQueueForNext serverGRPC
   shutdownNotify shutdownQueue
   shutdownCQ shutdownQueue
-  grpcDebug "stopAsyncServer: cleaning up forks."
+  grpcDebug "stopAsyncServer: cleaning up outstanding requests."
   cleanupOutstandingRequests
   grpcDebug "stopAsyncServer: call grpc_server_destroy."
   C.grpcServerDestroy s
@@ -363,11 +365,11 @@ stopAsyncServer AsyncServer{ unsafeServer = s, .. } = do
         cleanupOutstandingRequests = do
           atomically $ writeTVar serverShuttingDown True
           liveCalls <- readTVarIO outstandingCallStates
-          grpcDebug $ "Server shutdown: killing threads: " ++ show (S.map asyncThreadId liveCalls)
+          grpcDebug $ "Server shutdown: killing threads: " ++ show (Map.keys liveCalls)
           traverse_ cancel liveCalls
           -- wait for threads to shut down
           grpcDebug "Server shutdown: waiting until all threads are dead."
-          atomically $ check . (==0) . S.size =<< readTVar outstandingCallStates
+          atomically $ check . Map.null =<< readTVar outstandingCallStates
           grpcDebug "Server shutdown: All forks cleaned up."
 
 -- | Less precisely-typed registration function used in
