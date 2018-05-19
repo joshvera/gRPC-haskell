@@ -58,28 +58,32 @@ runCallState :: AsyncServer -> CallState -> [Handler 'Normal] -> IO (Async ())
 runCallState server callState allHandlers = case callState of
   Listen -> do
     tag' <- newTag (serverCallQueue server)
-    grpcDebug ("Creating tag" ++ show tag')
+    grpcDebug ("Listen: register for call with tag" ++ show tag')
     callPtr <- C.malloc
     metadataPtr <- C.metadataArrayCreate
     metadata  <- peek metadataPtr
     callDetails <- C.createCallDetails
-    callError <- C.grpcServerRequestCall (unsafeServer (server :: AsyncServer)) callPtr callDetails metadata (unsafeCQ . serverOpsQueue $ server) (unsafeCQ . serverCallQueue $ server) tag'
 
-    let cleanup = do
-          C.metadataArrayDestroy metadataPtr
-          C.destroyCallDetails callDetails
-          C.free callPtr
-        go = case callError of
-               C.CallOk -> do
-                 let state = StartRequest callPtr callDetails metadata tag' cleanup
-                 insertCall server tag' state
-               other -> throw (GRPCIOCallError other)
-
-    async (go `onException` cleanup)
+    let
+      cleanup = do
+        C.metadataArrayDestroy metadataPtr
+        C.destroyCallDetails callDetails
+        C.free callPtr
+      go = do
+        callError <- C.grpcServerRequestCall (unsafeServer (server :: AsyncServer)) callPtr callDetails metadata (unsafeCQ . serverOpsQueue $ server) (unsafeCQ . serverCallQueue $ server) tag'
+        case callError of
+          C.CallOk -> do
+            let state = StartRequest callPtr callDetails metadata tag' cleanup
+            grpcDebug ("Listen: inserting call with tag" ++ show tag')
+            insertCall server tag' state
+          other -> do
+            grpcDebug $ "grpcServerRequestCall: Call Error" ++ show other
+            throw (GRPCIOCallError other)
+    go `onException` cleanup
+    async (pure ())
 
   StartRequest callPtr callDetails metadata tag cleanup -> do
-    _ <- wait <$> runCallState server Listen allHandlers
-
+    grpcDebug ("StartRequest: runnin operations for tag" ++ show tag)
     serverCall <- U.ServerCall
       <$> peek callPtr
       <*> pure (serverOpsQueue server)
@@ -93,12 +97,13 @@ runCallState server callState allHandlers = case callState of
       operations = [ OpSendInitialMetadata (U.metadata serverCall), OpRecvMessage ]
       sendOps = runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array, contexts) -> do
         let state = ReceivePayload serverCall tag array contexts cleanup'
+        grpcDebug ("StartRequest: replacing call with tag" ++ show tag)
         replaceCall server tag state `onException` destroyOpArrayAndContexts array contexts
     async (sendOps `onException` cleanup')
 
   ReceivePayload serverCall tag array contexts cleanup -> do
+    grpcDebug $ "ReceivePayload: Received payload for tag" ++ show tag
     payload <- readAndDestroy array contexts
-    grpcDebug "ReceivePayload: Received MessageResult"
     normalHandler <- maybe (throw $ UnknownHandler (U.callMethod serverCall)) pure (findHandler serverCall allHandlers)
       `onException` cleanup
     async (callHandler normalHandler payload `onException` cleanup)
@@ -109,18 +114,21 @@ runCallState server callState allHandlers = case callState of
           UnaryHandler _ handler -> convertServerHandler handler (const string <$> U.convertCall serverCall)
       callHandler normalHandler = \case
         [OpRecvMessageResult (Just body)] -> do
-          grpcDebug ("ReceivePayload: Received payload:" ++ show body)
 
+          grpcDebug $ "ReceivePayload: Received calling handler for tag" ++ show tag
           (rsp, trailMeta, st, ds) <- f normalHandler body
 
           let operations = [ OpRecvCloseOnServer , OpSendMessage rsp, OpSendStatusFromServer trailMeta st ds ]
           runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array', contexts') -> do
             let state = AcknowledgeResponse tag array' contexts' cleanup
+            grpcDebug $ "ReceivePayload: Replacing call for tag" ++ show tag
             replaceCall server tag state `onException` destroyOpArrayAndContexts array' contexts'
         rest -> throw (ImpossiblePayload $ "ReceivePayload: Impossible payload result: " ++ show rest)
 
   AcknowledgeResponse tag array contexts cleanup -> do
     destroyOpArrayAndContexts array contexts -- Safe to teardown after calling 'resultFromOpContext'.
+    tid <- myThreadId
+    grpcDebug $ "AcknowledgeResponse: Deleting Call with tag: " ++ show tag ++ "on thread:" ++ show tid
     deleteCall server tag `finally` cleanup
     async (pure ())
 
@@ -142,6 +150,19 @@ asyncDispatchLoop s logger md hN _ _ _ = do
         Right event -> do
           clientCallData <- lookupCall s (C.eventTag event)
           case clientCallData of
+            Just callData@(StartRequest _ _ _ _ _) -> do
+              _ <- wait <$> runCallState s Listen hN
+              ready <- newTVarIO False
+              asyncCall <- async $ do
+                atomically (check =<< readTVar ready)
+                tid <- myThreadId
+                asyncCall <- runCallState s callData hN
+                wait asyncCall `finally` cleanup tid
+
+              atomically $ do
+                modifyTVar' (outstandingCallStates s) (Map.insert (asyncThreadId asyncCall) asyncCall)
+                modifyTVar' ready (const True)
+              where cleanup tid = atomically $ modifyTVar' (outstandingCallStates s) (Map.delete tid)
             Just callData -> do
               ready <- newTVarIO False
               asyncCall <- async $ do
