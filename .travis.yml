@@ -21,9 +21,13 @@ before_install:
 - export PATH=$HOME/.local/bin:$PATH
 - travis_retry curl -L https://get.haskellstack.org/stable/linux-x86_64.tar.gz | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
 # Install grpc
-- echo "deb http://http.debian.net/debian jessie-backports main" | sudo tee -a /etc/apt/sources.list
-- sudo apt-get update -y
-- sudo apt-get install libgrpc-dev -y --force-yes
+- sudo apt-get install build-essential autoconf libtool
+- git clone https://github.com/grpc/grpc.git
+- cd grpc
+- git checkout release-0_12
+- git submodule update --init
+- make
+- sudo make install
 
 install:
 # Build dependencies
