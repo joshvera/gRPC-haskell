@@ -28,7 +28,6 @@ import           Control.Concurrent.STM.TVar           (TVar
                                                         , readTVarIO
                                                         , writeTVar
                                                         , newTVarIO)
-import           Control.Exception                     (bracket, finally)
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Except
@@ -64,6 +63,12 @@ import Data.IORef
 import Control.Concurrent.Async (Async, cancel, asyncThreadId)
 import Data.Foldable (traverse_)
 import System.IO (hPutStrLn, stderr)
+import Control.Exception.Safe
+
+data BindPortException = BindPortException String
+  deriving (Show, Typeable)
+
+instance Exception BindPortException
 
 -- | Wraps various gRPC state needed to run a server.
 data Server = Server
@@ -311,7 +316,7 @@ startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \
   server <- C.grpcServerCreate args C.reserved
   actualPort <- addPort server config
 
-  when (unPort port > 0 && actualPort /= unPort port) (error $ "Unable to bind port: " ++ show port)
+  when (unPort port > 0 && actualPort /= unPort port) (throw . BindPortException $ "Unable to bind port: " ++ show port)
 
   callQueue <- createCompletionQueueForNext grpc
   serverRegisterCompletionQueue server callQueue

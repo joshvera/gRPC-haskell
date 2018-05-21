@@ -250,7 +250,7 @@ runOpsAsync call cq tag ops fun =
     grpcDebug $ "runOpsAsync: allocated op contexts: " ++ show contexts
     grpcDebug $ "runOpsAsync: tag: " ++ show tag
     grpcDebug $ "runOpsAsync: call: " ++ show call
-    value <- fun (opArray, contexts)
+    value <- fun opArray contexts
     callError <- startBatch cq call opArray l tag `onException` destroyOpArrayAndContexts opArray contexts
     grpcDebug "runOpsAsync: called start_batch."
     case callError of
