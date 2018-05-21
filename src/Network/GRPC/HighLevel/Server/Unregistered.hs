@@ -4,9 +4,9 @@
 module Network.GRPC.HighLevel.Server.Unregistered where
 
 import           Control.Arrow (left)
-import           Control.Concurrent (myThreadId, threadDelay)
+import           Control.Concurrent (myThreadId)
 import           Control.Concurrent.Async
-    (Async (..), async, cancel, concurrently_, race_, wait, waitAnyCancel, waitBoth, withAsync)
+    (Async (..), async, cancel, wait, waitAnyCancel)
 import           Control.Concurrent.STM
 import           Control.Exception (AsyncException (..), asyncExceptionFromException, asyncExceptionToException)
 import           Control.Exception.Safe hiding (Handler)
