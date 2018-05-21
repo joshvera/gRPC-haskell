@@ -186,9 +186,8 @@ asyncDispatchLoop s logger md hN _ _ _ = do
 
 asyncServerLoop :: ServerOptions -> IO ()
 asyncServerLoop ServerOptions{..} = do
-  -- We run the loop in a new thread so that we can kill the serverLoop thread.
-  -- Without this fork, we block on a foreign call, which can't be interrupted.
   mainId <- myThreadId
+  -- Throw a Terminated async exception to the main thread on SIGTERM to shutdown gracefully.
   P.installHandler P.sigTERM (P.CatchOnce $ throwTo mainId Terminated) Nothing
 
   withGRPC $ \grpc -> do
