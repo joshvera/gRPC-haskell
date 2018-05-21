@@ -147,7 +147,7 @@ data ClientCall = ClientCall { unsafeCC :: C.Call }
 clientCallCancel :: ClientCall -> IO ()
 clientCallCancel cc = C.grpcCallCancel (unsafeCC cc) C.reserved
 
--- | Represents one registered GRPC call (.i.e request) on the server. Contains pointers to all
+-- | Represents one registered GRPC call (i.e. request) on the server. Contains pointers to all
 -- the C state needed to respond to the request.
 data ServerCall a = ServerCall
   { unsafeSC            :: C.Call
