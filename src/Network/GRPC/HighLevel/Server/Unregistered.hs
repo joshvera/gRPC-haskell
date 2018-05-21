@@ -1,41 +1,35 @@
-{-# LANGUAGE DataKinds           #-}
-{-# LANGUAGE GADTs               #-}
-{-# LANGUAGE LambdaCase          #-}
-{-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE RankNTypes          #-}
-{-# LANGUAGE RecordWildCards     #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE DataKinds, DuplicateRecordFields, GADTs, LambdaCase, OverloadedStrings, RankNTypes, RecordWildCards,
+             ScopedTypeVariables #-}
 
 module Network.GRPC.HighLevel.Server.Unregistered where
 
 import           Control.Arrow (left)
-import Control.Concurrent (myThreadId, threadDelay)
-import System.Exit (exitSuccess, ExitCode(..))
-import           Control.Concurrent.Async                  (withAsync, async, wait, concurrently_, Async(..), cancel, race_, waitAnyCancel, waitBoth)
-import Control.Exception.Safe hiding (Handler)
+import           Control.Concurrent (myThreadId, threadDelay)
+import           Control.Concurrent.Async
+    (Async (..), async, cancel, concurrently_, race_, wait, waitAnyCancel, waitBoth, withAsync)
+import           Control.Concurrent.STM
+import           Control.Exception (AsyncException (..), asyncExceptionFromException, asyncExceptionToException)
+import           Control.Exception.Safe hiding (Handler)
 import qualified Control.Exception.Safe as E
-import Control.Exception (AsyncException(..), asyncExceptionFromException, asyncExceptionToException)
 import           Control.Monad
-import           Data.Foldable                             (find)
+import           Data.Foldable (find)
+import qualified Data.Map.Strict as Map
+import qualified Foreign.Marshal.Alloc as C
+import           Foreign.Storable (peek)
 import           Network.GRPC.HighLevel.Server
 import           Network.GRPC.LowLevel
+import qualified Network.GRPC.LowLevel.Call.Unregistered as U
+import           Network.GRPC.LowLevel.CompletionQueue.Internal (CompletionQueue (..), newTag, next)
 import           Network.GRPC.LowLevel.GRPC (grpcDebug)
-import qualified Network.GRPC.LowLevel.Call.Unregistered   as U
+import           Network.GRPC.LowLevel.Op (destroyOpArrayAndContexts, readAndDestroy, runOpsAsync)
+import           Network.GRPC.LowLevel.Server
 import qualified Network.GRPC.LowLevel.Server.Unregistered as U
-import Network.GRPC.LowLevel.Server
+import qualified Network.GRPC.Unsafe as C
+import qualified Network.GRPC.Unsafe.Metadata as C
+import qualified Network.GRPC.Unsafe.Time as C
 import           Proto3.Suite.Class
-import qualified Network.GRPC.Unsafe                            as C
-import qualified Network.GRPC.Unsafe.Metadata                   as C
-import qualified Network.GRPC.Unsafe.Time                       as C
-import           Foreign.Storable                               (peek)
-import           Network.GRPC.LowLevel.CompletionQueue.Internal (newTag, CompletionQueue(..), next)
-import           Network.GRPC.LowLevel.Op (runOpsAsync, destroyOpArrayAndContexts, readAndDestroy)
-import qualified Foreign.Marshal.Alloc as C
+import           System.IO (hPutStrLn, stderr)
 import qualified System.Posix.Signals as P
-import qualified Data.Map.Strict as Map
-import Control.Concurrent.STM
-import System.IO (hPutStrLn, stderr)
 
 -- Exceptions that may be thrown during call state execution.
 data CallStateException =
