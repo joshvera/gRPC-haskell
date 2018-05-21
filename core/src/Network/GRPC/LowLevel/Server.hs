@@ -329,44 +329,42 @@ startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \
 
 stopAsyncServer :: AsyncServer -> IO ()
 -- TODO: Do method handles need to be freed?
-stopAsyncServer AsyncServer{ unsafeServer = s, .. } = do
+stopAsyncServer AsyncServer{ unsafeServer = server, .. } = do
   grpcDebug "stopAsyncServer: shutdownNotify serverCallQueue"
-  shutdownQueue <- createCompletionQueueForNext serverGRPC
+  shutdownQueue' <- createCompletionQueueForNext serverGRPC
   shutdownNotify shutdownQueue
-  shutdownCQ shutdownQueue
+  shutdownQueue shutdownQueue'
   grpcDebug "stopAsyncServer: cleaning up outstanding requests."
   cleanupOutstandingRequests
   grpcDebug "stopAsyncServer: call grpc_server_destroy."
-  C.grpcServerDestroy s
+  C.grpcServerDestroy server
   -- Queues must be shut down after the server is destroyed.
   grpcDebug "stopAsyncServer: shutting serverOpsQueue"
-  shutdownCQ serverOpsQueue
+  shutdownQueue serverOpsQueue
   grpcDebug "stopAsyncServer: shutting serverCallQueue"
-  shutdownCQ serverCallQueue
+  shutdownQueue serverCallQueue
 
 
-  where shutdownCQ scq = do
-          shutdownResult <- shutdownCompletionQueueForNext scq
+  where shutdownQueue queue = do
+          shutdownResult <- shutdownCompletionQueueForNext queue
           case shutdownResult of
             Left GRPCIOTimeout -> do hPutStrLn stderr "stopServer: Could not stop cleanly. Cancelling all calls."
-                                     C.grpcServerCancelAllCalls s
+                                     C.grpcServerCancelAllCalls server
             Left _ -> do hPutStrLn stderr "Warning: completion queue didn't shut down."
                          hPutStrLn stderr "Trying to stop server anyway."
             Right _ -> return ()
-        shutdownNotify scq = do
+        shutdownNotify queue = do
           let shutdownTag = C.tag 0
-          serverShutdownAndNotify s scq shutdownTag
+          serverShutdownAndNotify server queue shutdownTag
           grpcDebug "called serverShutdownAndNotify; plucking."
-          shutdownEvent <- next scq (Just 30)
+          shutdownEvent <- next scq (Just 5)
           grpcDebug $ "shutdownNotify: got shutdown event" ++ show shutdownEvent
           case shutdownEvent of
-            -- This case occurs when we pluck but the queue is already in the
-            -- 'shuttingDown' state, implying we already tried to shut down.
             Left GRPCIOShutdown -> error "Called stopServer twice!"
             Left GRPCIOTimeout -> do
-              grpcDebug "stopAsyncServer: shutdownNotify: Could not stop cleanly. Cancelling all calls."
+              hPutStrLn stderr "stopAsyncServer: shutdownNotify: Could not stop cleanly. Cancelling all calls."
               C.grpcServerCancelAllCalls s
-            Left err              -> error ("Failed to stop server:" ++ show err)
+            Left err            -> error ("Failed to stop server:" ++ show err)
             Right _             -> return ()
         cleanupOutstandingRequests = do
           atomically $ writeTVar serverShuttingDown True
