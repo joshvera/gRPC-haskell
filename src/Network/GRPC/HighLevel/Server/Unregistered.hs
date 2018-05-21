@@ -159,9 +159,9 @@ asyncDispatchLoop s logger md hN _ _ _ = do
                 wait asyncCall `finally` cleanup tid
 
               atomically $ do
-                modifyTVar' (outstandingCallStates s) (Map.insert (asyncThreadId asyncCall) asyncCall)
+                modifyTVar' (outstandingCallActions s) (Map.insert (asyncThreadId asyncCall) asyncCall)
                 modifyTVar' ready (const True)
-              where cleanup tid = atomically $ modifyTVar' (outstandingCallStates s) (Map.delete tid)
+              where cleanup tid = atomically $ modifyTVar' (outstandingCallActions s) (Map.delete tid)
             Nothing -> throw $ NotFound event
         Left GRPCIOTimeout -> pure ()
         Left err -> throw err

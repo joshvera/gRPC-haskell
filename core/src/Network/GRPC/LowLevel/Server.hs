@@ -104,28 +104,32 @@ data AsyncServer = AsyncServer
 
 data CallState where
   Listen :: CallState
+  -- ^ Register the server to listen for new requests.
   StartRequest :: Ptr C.Call -> C.CallDetails -> C.MetadataArray -> C.Tag -> IO () -> CallState
+  -- ^ Start a request when a call comes in from a client.
   ReceivePayload :: U.ServerCall -> C.Tag -> C.OpArray -> [OpContext] -> IO () -> CallState
+  -- ^ Read the client payload from the given context and deliver a message to the client.
   AcknowledgeResponse :: C.Tag -> C.OpArray -> [OpContext] -> IO () -> CallState
+  -- ^ Cleanup the client's call.
 
 lookupCall :: AsyncServer -> C.Tag -> IO (Maybe CallState)
 lookupCall s t = atomically $ do
-  states <- readTVar (inProgressRequests s)
+  states <- readTVar (inProgressCallStates s)
   let state = HashMap.lookup t states
   check (isJust state)
   pure state
 
 
 insertCall :: AsyncServer -> C.Tag -> CallState -> IO ()
-insertCall s t state = atomically $ modifyTVar' (inProgressRequests s) (HashMap.insert t state)
+insertCall s t state = atomically $ modifyTVar' (inProgressCallStates s) (HashMap.insert t state)
 
 
 replaceCall :: AsyncServer -> C.Tag -> CallState -> IO ()
-replaceCall s t state = atomically $ modifyTVar' (inProgressRequests s) (HashMap.insert t state)
+replaceCall s t state = atomically $ modifyTVar' (inProgressCallStates s) (HashMap.insert t state)
 
 
 deleteCall :: AsyncServer -> C.Tag -> IO ()
-deleteCall s t = atomically $ modifyTVar' (inProgressRequests s) (HashMap.delete t)
+deleteCall s t = atomically $ modifyTVar' (inProgressCallStates s) (HashMap.delete t)
 
 -- TODO: should we make a forkGRPC function instead? I am not sure if it would
 -- be safe to let the call handlers threads keep running after the server stops,
@@ -324,8 +328,8 @@ startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \
   C.grpcServerStart server
   forks <- newTVarIO mempty
   shutdown <- newTVarIO False
-  inProgressRequests <- newTVarIO mempty
-  pure $ AsyncServer grpc server (Port actualPort) callQueue opsQueue ns config forks shutdown inProgressRequests
+  inProgressCallStates <- newTVarIO mempty
+  pure $ AsyncServer grpc server (Port actualPort) callQueue opsQueue ns config forks inProgressCallStates shutdown
 
 stopAsyncServer :: AsyncServer -> IO ()
 -- TODO: Do method handles need to be freed?
@@ -370,12 +374,12 @@ stopAsyncServer AsyncServer{ unsafeServer = s, .. } = do
             Right _             -> return ()
         cleanupOutstandingRequests = do
           atomically $ writeTVar serverShuttingDown True
-          liveCalls <- readTVarIO outstandingCallStates
+          liveCalls <- readTVarIO outstandingCallActions
           grpcDebug $ "Server shutdown: killing threads: " ++ show (Map.keys liveCalls)
           traverse_ cancel liveCalls
           -- wait for threads to shut down
           grpcDebug "Server shutdown: waiting until all threads are dead."
-          atomically $ check . Map.null =<< readTVar outstandingCallStates
+          atomically $ check . Map.null =<< readTVar outstandingCallActions
           grpcDebug "Server shutdown: All forks cleaned up."
 
 -- | Less precisely-typed registration function used in
