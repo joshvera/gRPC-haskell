@@ -244,18 +244,17 @@ runOpsAsync :: C.Call
             -- ^ A function that yields allocated OpArray and OpContexts.
             -- You are responsible for freeing these with 'destroyOpArrayAndContexts'.
             -> IO b
-runOpsAsync call cq tag ops fun =
-  let l = length ops in do
-    (opArray, contexts) <- allocOpArrayAndContexts ops
-    grpcDebug $ "runOpsAsync: allocated op contexts: " ++ show contexts
-    grpcDebug $ "runOpsAsync: tag: " ++ show tag
-    grpcDebug $ "runOpsAsync: call: " ++ show call
-    value <- fun opArray contexts
-    callError <- startBatch cq call opArray l tag `onException` destroyOpArrayAndContexts opArray contexts
-    grpcDebug "runOpsAsync: called start_batch."
-    case callError of
-      Left x -> grpcDebug ("runOpsAsync: callError:" ++ show callError) >> throw x
-      Right () -> pure value
+runOpsAsync call cq tag ops fun = do
+  (opArray, contexts) <- allocOpArrayAndContexts ops
+  grpcDebug $ "runOpsAsync: allocated op contexts: " ++ show contexts
+  grpcDebug $ "runOpsAsync: tag: " ++ show tag
+  grpcDebug $ "runOpsAsync: call: " ++ show call
+  value <- fun opArray contexts
+  callError <- startBatch cq call opArray (length ops) tag `onException` destroyOpArrayAndContexts opArray contexts
+  grpcDebug "runOpsAsync: called start_batch."
+  case callError of
+    Left x -> grpcDebug ("runOpsAsync: callError:" ++ show callError) >> throw x
+    Right () -> pure value
 
 destroyOpArrayAndContexts :: Foldable t => C.OpArray -> t OpContext -> IO ()
 destroyOpArrayAndContexts array contexts = do
