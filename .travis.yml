@@ -31,8 +31,8 @@ before_install:
 
 install:
 # Build dependencies
-- stack --no-terminal --install-ghc test --only-dependencies --fast
+- stack --no-terminal --install-ghc test --only-dependencies --fast --extra-lib-dirs=/usr/local/lib
 
 script:
 # Build the package, its tests, and its docs and run the tests
-- stack --no-terminal test --haddock --no-haddock-deps
+- stack --no-terminal test --haddock --no-haddock-deps --extra-lib-dirs=/usr/local/lib
