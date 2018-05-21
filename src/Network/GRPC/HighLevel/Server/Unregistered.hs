@@ -61,8 +61,8 @@ instance Exception ServerException where
 -- Shutting down the server by cancelling in progress async requests
 -- Shutting down the server at all
 
-runCallState :: AsyncServer -> CallState -> [Handler 'Normal] -> IO (Async ())
-runCallState server callState allHandlers = case callState of
+runCallState :: AsyncServer ->  [Handler 'Normal] -> CallState -> IO (Async ())
+runCallState server allHandlers = \case
   Listen -> do
     tag' <- newTag (serverCallQueue server)
     grpcDebug ("Listen: register for call with tag" ++ show tag')
@@ -89,7 +89,7 @@ runCallState server callState allHandlers = case callState of
     async (go `onException` cleanup)
 
   StartRequest callPtr callDetails metadata tag cleanup -> do
-    wait <$> runCallState server Listen allHandlers
+    wait <$> runCallState server allHandlers Listen
     grpcDebug ("StartRequest: runnin operations for tag" ++ show tag)
     serverCall <- U.ServerCall
       <$> peek callPtr
@@ -148,7 +148,7 @@ asyncDispatchLoop :: AsyncServer
              -> [Handler 'BiDiStreaming]
              -> IO (Async (), Async ())
 asyncDispatchLoop s logger md hN _ _ _ = do
-  wait <$> runCallState s Listen hN
+  wait <$> runCallState s hN Listen
   (,) <$> loop (serverCallQueue s) (Just 1) <*> loop (serverOpsQueue s) (Just 1)
   where
     loop queue timeout = async . forever $ do
@@ -162,7 +162,7 @@ asyncDispatchLoop s logger md hN _ _ _ = do
               asyncCall <- async $ do
                 atomically (check =<< readTVar ready)
                 tid <- myThreadId
-                asyncCall <- runCallState s callData hN
+                asyncCall <- runCallState s hN callData
                 wait asyncCall `finally` cleanup tid
 
               atomically $ do
