@@ -63,6 +63,7 @@ import qualified Network.GRPC.Unsafe.Metadata  as C
 import Data.IORef
 import Control.Concurrent.Async (Async, cancel, asyncThreadId)
 import Data.Foldable (traverse_)
+import System.IO (hPutStrLn, stderr)
 
 -- | Wraps various gRPC state needed to run a server.
 data Server = Server
@@ -347,10 +348,10 @@ stopAsyncServer AsyncServer{ unsafeServer = s, .. } = do
   where shutdownCQ scq = do
           shutdownResult <- shutdownCompletionQueueForNext scq
           case shutdownResult of
-            Left GRPCIOTimeout -> do grpcDebug "stopServer: Could not stop cleanly. Cancelling all calls."
+            Left GRPCIOTimeout -> do hPutStrLn stderr "stopServer: Could not stop cleanly. Cancelling all calls."
                                      C.grpcServerCancelAllCalls s
-            Left _ -> do putStrLn "Warning: completion queue didn't shut down."
-                         putStrLn "Trying to stop server anyway."
+            Left _ -> do hPutStrLn stderr "Warning: completion queue didn't shut down."
+                         hPutStrLn stderr "Trying to stop server anyway."
             Right _ -> return ()
         shutdownNotify scq = do
           let shutdownTag = C.tag 0
