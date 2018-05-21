@@ -61,16 +61,21 @@ runCallState server allHandlers = \case
   Listen -> do
     tag' <- newTag (serverCallQueue server)
     grpcDebug ("Listen: register for call with tag" ++ show tag')
+    -- Allocate the C data necessary for the lifetime of a call.
     callPtr <- C.malloc
     metadataPtr <- C.metadataArrayCreate
     metadata  <- peek metadataPtr
     callDetails <- C.createCallDetails
 
     let
+      -- Make a cleanup function to carry around that deallocates the call data
+      -- in 'onException' and `finally` throughout the lifetime of the call.
       cleanup = do
         C.metadataArrayDestroy metadataPtr
         C.destroyCallDetails callDetails
         C.free callPtr
+      -- Listen for a call from the client with 'grpcServerRequestCall'
+      --  and insert the corresponding tag and call state into the server state.
       go = do
         callError <- C.grpcServerRequestCall (unsafeServer (server :: AsyncServer)) callPtr callDetails metadata (unsafeCQ . serverOpsQueue $ server) (unsafeCQ . serverCallQueue $ server) tag'
         case callError of
@@ -84,8 +89,11 @@ runCallState server allHandlers = \case
     async (go `onException` cleanup)
 
   StartRequest callPtr callDetails metadata tag cleanup -> do
+    -- Listen for a subsequent client call since we've started serving a client request.
     wait <$> runCallState server allHandlers Listen
-    grpcDebug ("StartRequest: runnin operations for tag" ++ show tag)
+    grpcDebug ("StartRequest: running operations for tag" ++ show tag)
+
+    -- A call has been allocated to 'callPtr' by gRPC.
     serverCall <- U.ServerCall
       <$> peek callPtr
       <*> pure (serverOpsQueue server)
@@ -95,9 +103,12 @@ runCallState server allHandlers = \case
       <*> (Host       <$> C.callDetailsGetHost     callDetails)
 
     let
+      -- Extend the cleanup function to destroy the server call if an exception occurs.
       cleanup' = cleanup >> U.destroyServerCall serverCall
       operations = [ OpSendInitialMetadata (U.metadata serverCall), OpRecvMessage ]
+      -- Send an 'OpRecvMessage' operation to receive a payload from the client.
       sendOps = runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array, contexts) -> do
+        -- Store the given array and contexts in the server to read when the payload comes back.
         let state = ReceivePayload serverCall tag array contexts cleanup'
         grpcDebug ("StartRequest: replacing call with tag" ++ show tag)
         replaceCall server tag state `onException` destroyOpArrayAndContexts array contexts
@@ -190,7 +201,7 @@ asyncServerLoop ServerOptions{..} = do
           E.Handler (\UserInterrupt -> cancel callLoop)
         , E.Handler (\Terminated    -> cancel callLoop)
         ]
-      `finally` (stopAsyncServer server)
+      `finally` stopAsyncServer server
 
 
   where
