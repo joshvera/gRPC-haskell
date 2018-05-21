@@ -23,7 +23,7 @@ before_install:
 # Install grpc
 - echo "deb http://http.debian.net/debian jessie-backports main" | sudo tee -a /etc/apt/sources.list
 - sudo apt-get update -y
-- sudo apt-get install libgrpc-dev -y --force-yes
+- sudo apt-get install libgrpc0 -y --force-yes
 
 install:
 # Build dependencies
