@@ -355,8 +355,8 @@ stopAsyncServer AsyncServer{ unsafeServer = server, .. } = do
           case shutdownResult of
             Left GRPCIOTimeout -> do hPutStrLn stderr "stopServer: Could not stop cleanly. Cancelling all calls."
                                      C.grpcServerCancelAllCalls server
-            Left _ -> do hPutStrLn stderr "Warning: completion queue didn't shut down."
-                         hPutStrLn stderr "Trying to stop server anyway."
+            Left err -> do hPutStrLn stderr ("Warning: completion queue didn't shut down: " ++ show err)
+                           hPutStrLn stderr "Trying to stop server anyway."
             Right _ -> return ()
         shutdownNotify queue = do
           let shutdownTag = C.tag 0
