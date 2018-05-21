@@ -56,11 +56,6 @@ instance Exception ServerException where
   fromException = asyncExceptionFromException
   toException = asyncExceptionToException
 
--- If an exception happens in a handler, don't kill the server.
--- Cleaning up resources in exceptional cases
--- Shutting down the server by cancelling in progress async requests
--- Shutting down the server at all
-
 runCallState :: AsyncServer ->  [Handler 'Normal] -> CallState -> IO (Async ())
 runCallState server allHandlers = \case
   Listen -> do
