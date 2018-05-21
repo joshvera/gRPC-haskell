@@ -9,7 +9,7 @@ packages:
 - '.'
 - 'core'
 - location:
-    git: git@github.com:joshvera/proto3-suite.git
+    git: https://github.com/joshvera/proto3-suite
     commit: a02c4bd01d3c6b1cefee6865f241c3cabab10817
   extra-dep: true
 - location:
