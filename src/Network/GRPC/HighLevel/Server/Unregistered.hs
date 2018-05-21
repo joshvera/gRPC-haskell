@@ -107,7 +107,7 @@ runCallState server allHandlers = \case
       cleanup' = cleanup >> U.destroyServerCall serverCall
       operations = [ OpSendInitialMetadata (U.metadata serverCall), OpRecvMessage ]
       -- Send an 'OpRecvMessage' operation to receive a payload from the client.
-      sendOps = runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array, contexts) -> do
+      sendOps = runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \array contexts -> do
         -- Store the given array and contexts in the server to read when the payload comes back.
         let state = ReceivePayload serverCall tag array contexts cleanup'
         grpcDebug ("StartRequest: replacing call with tag" ++ show tag)
@@ -132,7 +132,7 @@ runCallState server allHandlers = \case
           (rsp, trailMeta, st, ds) <- f normalHandler body
 
           let operations = [ OpRecvCloseOnServer , OpSendMessage rsp, OpSendStatusFromServer trailMeta st ds ]
-          runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \(array', contexts') -> do
+          runOpsAsync (U.unsafeSC serverCall) (U.callCQ serverCall) tag operations $ \array' contexts' -> do
             let state = AcknowledgeResponse tag array' contexts' cleanup
             grpcDebug $ "ReceivePayload: Replacing call for tag" ++ show tag
             replaceCall server tag state `onException` destroyOpArrayAndContexts array' contexts'

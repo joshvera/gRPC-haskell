@@ -240,7 +240,7 @@ runOpsAsync :: C.Call
             -- ^ The Tag associated with the call.
             -> [Op]
             -- ^ The list of operations to execute.
-            -> ((C.OpArray, [OpContext]) -> IO b)
+            -> (C.OpArray -> [OpContext] -> IO b)
             -- ^ A function that yields allocated OpArray and OpContexts.
             -- You are responsible for freeing these with 'destroyOpArrayAndContexts'.
             -> IO b
