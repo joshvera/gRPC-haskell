@@ -332,8 +332,8 @@ startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \
   inProgressCallStates <- newTVarIO mempty
   pure $ AsyncServer grpc server (Port actualPort) callQueue opsQueue ns config forks inProgressCallStates shutdown
 
-stopAsyncServer :: AsyncServer -> IO ()
 -- TODO: Do method handles need to be freed?
+stopAsyncServer :: AsyncServer -> IO ()
 stopAsyncServer AsyncServer{ unsafeServer = server, .. } = do
   grpcDebug "stopAsyncServer: shutdownNotify serverCallQueue"
   shutdownQueue' <- createCompletionQueueForNext serverGRPC
