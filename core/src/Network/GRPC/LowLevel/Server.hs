@@ -357,7 +357,7 @@ stopAsyncServer AsyncServer{ unsafeServer = server, .. } = do
           let shutdownTag = C.tag 0
           serverShutdownAndNotify server queue shutdownTag
           grpcDebug "called serverShutdownAndNotify; plucking."
-          shutdownEvent <- next queue (Just 5)
+          shutdownEvent <- next queue 10
           grpcDebug $ "shutdownNotify: got shutdown event" ++ show shutdownEvent
           case shutdownEvent of
             Left GRPCIOShutdown -> error "Called stopServer twice!"
