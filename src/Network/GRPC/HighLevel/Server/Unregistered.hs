@@ -37,7 +37,14 @@ import qualified System.Posix.Signals as P
 import qualified Data.Map.Strict as Map
 import Control.Concurrent.STM
 
-data CallStateException = ImpossiblePayload String | NotFound C.Event | GRPCException GRPCIOError | UnknownHandler MethodName
+-- Exceptions that may be thrown during call state execution.
+data CallStateException =
+  ImpossiblePayload String
+  -- ^ Programmer error. An unexpected message result was returned from the client.
+  | NotFound C.Event
+  -- ^ Programmer error. An event was not found in the map of in-progress call states.
+  | UnknownHandler MethodName
+  -- ^ An unknown handler was requested by a client call.
   deriving (Show, Typeable)
 
 instance Exception CallStateException
