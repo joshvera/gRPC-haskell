@@ -24,7 +24,7 @@ before_install:
 - sudo apt-get install build-essential autoconf libtool
 - git clone https://github.com/grpc/grpc.git
 - cd grpc
-- git checkout release-0_12
+- git checkout v1.12.0
 - git submodule update --init
 - make
 - sudo make install
