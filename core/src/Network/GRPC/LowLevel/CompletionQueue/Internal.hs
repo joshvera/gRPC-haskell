@@ -120,6 +120,7 @@ pluck' CompletionQueue{..} tag mwait =
     grpcDebug $ "pluck finished: " ++ show ev
     return $ if isEventSuccessful ev then Right () else eventToError ev
 
+-- | Waits `TimeoutSeconds` for an event on a next completion queue.
 next :: CompletionQueue
      -> Maybe TimeoutSeconds
      -> IO (Either GRPCIOError C.Event)
