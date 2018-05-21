@@ -84,18 +84,22 @@ data Server = Server
 
 -- | Wraps various gRPC state needed to run a server.
 data AsyncServer = AsyncServer
-  { serverGRPC            :: GRPC
-  , unsafeServer          :: C.Server
-  , listeningPort         :: Port
-  , serverCallQueue       :: CompletionQueue
-  -- ^ CQ used for receiving new calls.
-  , serverOpsQueue        :: CompletionQueue
-  -- ^ CQ for running or reading ops on calls. Not used to receive new calls.
-  , normalAsyncMethods    :: [RegisteredMethod 'Normal]
-  , serverConfig          :: ServerConfig
-  , outstandingCallStates :: TVar (Map ThreadId (Async ()))
-  , serverShuttingDown    :: TVar Bool
-  , inProgressRequests    :: TVar (HashMap C.Tag CallState)
+  { serverGRPC             :: GRPC
+  , unsafeServer           :: C.Server
+  , listeningPort          :: Port
+  , serverCallQueue        :: CompletionQueue
+  -- ^ CQ used for receiving new calls from clients.
+  , serverOpsQueue         :: CompletionQueue
+  -- ^ CQ for running or reading operations on calls. Not used to receive new calls.
+  , normalAsyncMethods     :: [RegisteredMethod 'Normal]
+  , serverConfig           :: ServerConfig
+  , outstandingCallActions :: TVar (Map ThreadId (Async ()))
+  -- ^ A Map of ThreadIds and async operations representing in progress call actions.
+  -- Used to cancel outstanding actions on server shutdown.
+  , inProgressCallStates   :: TVar (HashMap C.Tag CallState)
+    -- ^ A HashMap of call tags and call states representing in-progress call states.
+    -- Used to lookup and run the next step of an in-progress call.
+  , serverShuttingDown     :: TVar Bool
   }
 
 data CallState where
