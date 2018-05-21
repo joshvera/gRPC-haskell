@@ -158,7 +158,7 @@ asyncDispatchLoop s logger md hN _ _ _ = do
   -- Spin up two threads to handle events concurrently on the call queue and operations queue.
   -- Each thread has a 1 second deadline in order to yield control back to haskell
   -- so we don't block indefinitely on the FFI.
-  (,) <$> loop (serverCallQueue s) (Just 1) <*> loop (serverOpsQueue s) (Just 1)
+  (,) <$> loop (serverCallQueue s) 1 <*> loop (serverOpsQueue s) 1
   where
     loop queue timeout = async . forever $ do
       eitherEvent <- next queue timeout

@@ -122,11 +122,11 @@ pluck' CompletionQueue{..} tag mwait =
 
 -- | Waits `TimeoutSeconds` for an event on a next completion queue.
 next :: CompletionQueue
-     -> Maybe TimeoutSeconds
+     -> TimeoutSeconds
      -> IO (Either GRPCIOError C.Event)
-next CompletionQueue{..} mwait =
-  maybe C.withInfiniteDeadline C.withDeadlineSeconds mwait $ \dead -> do
-    grpcDebug $ "next: blocking on grpc_completion_queue_next"
+next CompletionQueue{..} wait =
+  C.withDeadlineSeconds wait $ \dead -> do
+    grpcDebug "next: blocking on grpc_completion_queue_next"
     ev <- C.grpcCompletionQueueNext unsafeCQ dead C.reserved
     grpcDebug $ "next finished: " ++ show ev
     return $ if isEventSuccessful ev then Right ev else eventToError ev
