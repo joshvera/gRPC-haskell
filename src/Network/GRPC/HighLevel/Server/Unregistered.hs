@@ -30,12 +30,12 @@ import qualified Network.GRPC.Unsafe.Metadata                   as C
 import qualified Network.GRPC.Unsafe.Time                       as C
 import           Foreign.Storable                               (peek)
 import           Network.GRPC.LowLevel.CompletionQueue.Internal (newTag, CompletionQueue(..), next)
-import           Network.GRPC.LowLevel.Op (runOpsAsync, resultFromOpContext, destroyOpArrayAndContexts, readAndDestroy)
-import Data.Maybe (catMaybes)
+import           Network.GRPC.LowLevel.Op (runOpsAsync, destroyOpArrayAndContexts, readAndDestroy)
 import qualified Foreign.Marshal.Alloc as C
 import qualified System.Posix.Signals as P
 import qualified Data.Map.Strict as Map
 import Control.Concurrent.STM
+import System.IO (hPutStrLn, stderr)
 
 -- Exceptions that may be thrown during call state execution.
 data CallStateException =
@@ -163,7 +163,7 @@ asyncDispatchLoop s logger md hN _ _ _ = do
                 atomically (check =<< readTVar ready)
                 tid <- myThreadId
                 asyncCall <- runCallState s hN callData
-                wait asyncCall `finally` cleanup tid
+                wait asyncCall `catchAny` (\ex -> hPutStrLn stderr (show ex)) `finally` cleanup tid
 
               atomically $ do
                 modifyTVar' (outstandingCallActions s) (Map.insert (asyncThreadId asyncCall) asyncCall)
