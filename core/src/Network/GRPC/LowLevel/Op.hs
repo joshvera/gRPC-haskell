@@ -225,6 +225,7 @@ runOps call cq ops =
               fmap (Right . catMaybes) $ mapM resultFromOpContext contexts
             Left err -> return $ Left err
 
+-- | Reads the list of `OpRecvResult` from the given operation array and contexts and frees them.
 readAndDestroy :: C.OpArray -> [OpContext] -> IO [OpRecvResult]
 readAndDestroy array contexts = results `finally` destroyOpArrayAndContexts array contexts
   where results = catMaybes <$> traverse resultFromOpContext contexts
@@ -236,9 +237,9 @@ runOpsAsync :: C.Call
             -> CompletionQueue
             -- ^ Queue to run the operations on.
             -> C.Tag
-            -- ^ The Tag associated with the call..
+            -- ^ The Tag associated with the call.
             -> [Op]
-            -- ^ The list of 'Op's to execute.
+            -- ^ The list of operations to execute.
             -> ((C.OpArray, [OpContext]) -> IO b)
             -- ^ A function that yields allocated OpArray and OpContexts.
             -- You are responsible for freeing these with 'destroyOpArrayAndContexts'.
