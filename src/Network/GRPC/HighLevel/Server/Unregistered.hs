@@ -84,7 +84,7 @@ runCallState server allHandlers = \case
             grpcDebug ("Listen: inserting call with tag" ++ show tag')
             insertCall server tag' state
           other -> do
-            grpcDebug $ "grpcServerRequestCall: Call Error" ++ show other
+            grpcDebug $ "Listen: grpcServerRequestCall: Call Error" ++ show other
             throw (GRPCIOCallError other)
     async (go `onException` cleanup)
 
