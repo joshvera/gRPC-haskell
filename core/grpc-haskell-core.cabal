@@ -62,8 +62,12 @@ library
     Network.GRPC.LowLevel.Call
     Network.GRPC.LowLevel.Call.Unregistered
     Network.GRPC.LowLevel.Client
-  extra-libraries:
-    grpc
+  if os(linux)
+    extra-libraries:
+      grpc0
+  else
+    extra-libraries:
+      grpc
   includes:
       include/grpc_haskell.h
     , grpc/grpc.h
