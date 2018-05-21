@@ -332,7 +332,7 @@ stopAsyncServer :: AsyncServer -> IO ()
 stopAsyncServer AsyncServer{ unsafeServer = server, .. } = do
   grpcDebug "stopAsyncServer: shutdownNotify serverCallQueue"
   shutdownQueue' <- createCompletionQueueForNext serverGRPC
-  shutdownNotify shutdownQueue
+  shutdownNotify shutdownQueue'
   shutdownQueue shutdownQueue'
   grpcDebug "stopAsyncServer: cleaning up outstanding requests."
   cleanupOutstandingRequests
@@ -357,13 +357,13 @@ stopAsyncServer AsyncServer{ unsafeServer = server, .. } = do
           let shutdownTag = C.tag 0
           serverShutdownAndNotify server queue shutdownTag
           grpcDebug "called serverShutdownAndNotify; plucking."
-          shutdownEvent <- next scq (Just 5)
+          shutdownEvent <- next queue (Just 5)
           grpcDebug $ "shutdownNotify: got shutdown event" ++ show shutdownEvent
           case shutdownEvent of
             Left GRPCIOShutdown -> error "Called stopServer twice!"
             Left GRPCIOTimeout -> do
-              hPutStrLn stderr "stopAsyncServer: shutdownNotify: Could not stop cleanly. Cancelling all calls."
-              C.grpcServerCancelAllCalls s
+              hPutStrLn stderr "Could not stop cleanly. Cancelling all calls."
+              C.grpcServerCancelAllCalls server
             Left err            -> error ("Failed to stop server:" ++ show err)
             Right _             -> return ()
         cleanupOutstandingRequests = do
