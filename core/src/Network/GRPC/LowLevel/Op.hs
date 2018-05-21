@@ -256,6 +256,7 @@ runOpsAsync call cq tag ops fun =
       Left x -> grpcDebug ("runOpsAsync: callError:" ++ show callError) >> throw x
       Right () -> pure value
 
+destroyOpArrayAndContexts :: Foldable t => C.OpArray -> t OpContext -> IO ()
 destroyOpArrayAndContexts array contexts = do
   C.opArrayDestroy array (length contexts)
   mapM_ freeOpContext contexts
