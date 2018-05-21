@@ -220,7 +220,7 @@ addPort server conf@ServerConfig{..} =
            C.serverAddSecureHttp2Port server e creds
   where e = unEndpoint $ serverEndpoint conf
 
-startServer :: GRPC -> ServerConfig -> IO (Server)
+startServer :: GRPC -> ServerConfig -> IO Server
 startServer grpc conf@ServerConfig{..} =
   C.withChannelArgs serverArgs $ \args -> do
     let e = serverEndpoint conf
@@ -251,7 +251,6 @@ startServer grpc conf@ServerConfig{..} =
     shutdown <- newTVarIO False
     return $ Server grpc server (Port actualPort) cq ccq ns ss cs bs conf forks
       shutdown
-
 
 stopServer :: Server -> IO ()
 -- TODO: Do method handles need to be freed?
@@ -318,10 +317,6 @@ startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \
   opsQueue <- createCompletionQueueForNext grpc
   grpcDebug $ "startServer: Server Queue: " ++ show callQueue
 
-  -- Register methods according to their GRPCMethodType kind. It's a bit ugly
-  -- to partition them this way, but we get very convenient phantom typing
-  -- elsewhere by doing so.
-  -- TODO: change order of args so we can eta reduce.
   let endpoint = serverEndpoint config
   ns <- traverse (\nm -> serverRegisterMethodNormal server nm endpoint) methodsToRegisterNormal
 
