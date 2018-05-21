@@ -246,7 +246,7 @@ runOpsAsync :: C.Call
             -> IO b
 runOpsAsync call cq tag ops fun =
   let l = length ops in do
-    (opArray, contexts) <- allocOpArrayAndCtxs ops
+    (opArray, contexts) <- allocOpArrayAndContexts ops
     grpcDebug $ "runOpsAsync: allocated op contexts: " ++ show contexts
     grpcDebug $ "runOpsAsync: tag: " ++ show tag
     grpcDebug $ "runOpsAsync: call: " ++ show call
@@ -262,8 +262,8 @@ destroyOpArrayAndContexts array contexts = do
   C.opArrayDestroy array (length contexts)
   mapM_ freeOpContext contexts
 
-allocOpArrayAndCtxs :: [Op] -> IO (C.OpArray, [OpContext])
-allocOpArrayAndCtxs ops = do
+allocOpArrayAndContexts :: [Op] -> IO (C.OpArray, [OpContext])
+allocOpArrayAndContexts ops = do
   contexts <- traverse createOpContext ops
   let l = length ops
   arr <- C.opArrayCreate l
