@@ -155,6 +155,9 @@ asyncDispatchLoop :: AsyncServer
              -> IO (Async (), Async ())
 asyncDispatchLoop s logger md hN _ _ _ = do
   wait <$> runCallState s hN Listen
+  -- Spin up two threads to handle events concurrently on the call queue and operations queue.
+  -- Each thread has a 1 second deadline in order to yield control back to haskell
+  -- so we don't block indefinitely on the FFI.
   (,) <$> loop (serverCallQueue s) (Just 1) <*> loop (serverOpsQueue s) (Just 1)
   where
     loop queue timeout = async . forever $ do
@@ -166,6 +169,8 @@ asyncDispatchLoop s logger md hN _ _ _ = do
             Just callData -> do
               ready <- newTVarIO False
               asyncCall <- async $ do
+                -- The ready TVar is used to block the async runCallState until the call
+                -- has been added to 'outstandingCallActions'.
                 atomically (check =<< readTVar ready)
                 tid <- myThreadId
                 asyncCall <- runCallState s hN callData
