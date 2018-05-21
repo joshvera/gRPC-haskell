@@ -22,7 +22,7 @@ before_install:
 - travis_retry curl -L https://get.haskellstack.org/stable/linux-x86_64.tar.gz | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
 # Install grpc
 - sudo apt-get -qq update
-- sudo apt-get install -y grpc
+- sudo apt-get install -y libgrpc-dev
 
 install:
 # Build dependencies
