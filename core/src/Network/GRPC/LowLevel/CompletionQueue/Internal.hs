@@ -108,7 +108,7 @@ pluck cq@CompletionQueue{..} tag mwait = do
   grpcDebug $ "pluck: called with tag=" ++ show tag ++ ",mwait=" ++ show mwait
   withPermission Pluck cq $ pluck' cq tag mwait
 
--- Variant of pluck' which assumes pluck permission has been granted.
+-- Variant of 'pluck' which assumes pluck permission has been granted.
 pluck' :: CompletionQueue
        -> C.Tag
        -> Maybe TimeoutSeconds
@@ -119,6 +119,17 @@ pluck' CompletionQueue{..} tag mwait =
     ev <- C.grpcCompletionQueuePluck unsafeCQ tag dead C.reserved
     grpcDebug $ "pluck finished: " ++ show ev
     return $ if isEventSuccessful ev then Right () else eventToError ev
+
+-- | Waits `TimeoutSeconds` for an event on a next completion queue.
+next :: CompletionQueue
+     -> TimeoutSeconds
+     -> IO (Either GRPCIOError C.Event)
+next CompletionQueue{..} wait =
+  C.withDeadlineSeconds wait $ \dead -> do
+    grpcDebug "next: blocking on grpc_completion_queue_next"
+    ev <- C.grpcCompletionQueueNext unsafeCQ dead C.reserved
+    grpcDebug $ "next finished: " ++ show ev
+    return $ if isEventSuccessful ev then Right ev else eventToError ev
 
 -- | Translate 'C.Event' to an error. The caller is responsible for ensuring
 -- that the event actually corresponds to an error condition; a successful event
@@ -178,7 +189,7 @@ shutdownCompletionQueueForPluck scq@CompletionQueue{..} = do
             C.OpComplete -> drainLoop
 
 shutdownCompletionQueueForNext :: CompletionQueue -> IO (Either GRPCIOError ())
-shutdownCompletionQueueForNext scq@CompletionQueue{..} = do
+shutdownCompletionQueueForNext CompletionQueue{..} = do
   atomically $ writeTVar shuttingDown True
   -- TODO: Probably don't need to check currentPushers and currentPluckers here.
   atomically $ do

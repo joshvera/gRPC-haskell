@@ -7,7 +7,9 @@
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE ViewPatterns        #-}
 {-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 -- | This module defines data structures and operations pertaining to registered
 -- servers using registered calls; for unregistered support, see
@@ -23,10 +25,9 @@ import           Control.Concurrent.STM                (atomically
 import           Control.Concurrent.STM.TVar           (TVar
                                                         , modifyTVar'
                                                         , readTVar
-                                                        , writeTVar
                                                         , readTVarIO
+                                                        , writeTVar
                                                         , newTVarIO)
-import           Control.Exception                     (bracket, finally)
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Except
@@ -38,6 +39,7 @@ import           Network.GRPC.LowLevel.CompletionQueue (CompletionQueue,
                                                         createCompletionQueueForPluck,
                                                         createCompletionQueueForNext,
                                                         pluck,
+                                                        next,
                                                         serverRegisterCompletionQueue,
                                                         serverRequestCall,
                                                         serverShutdownAndNotify,
@@ -49,6 +51,21 @@ import qualified Network.GRPC.Unsafe                   as C
 import qualified Network.GRPC.Unsafe.ChannelArgs       as C
 import qualified Network.GRPC.Unsafe.Op                as C
 import qualified Network.GRPC.Unsafe.Security          as C
+import qualified Data.HashMap.Strict as HashMap
+import Data.HashMap.Strict (HashMap)
+import Data.Maybe (isJust)
+import qualified Network.GRPC.LowLevel.Call.Unregistered  as U
+import Foreign.Ptr (Ptr)
+import qualified Network.GRPC.Unsafe.Metadata  as C
+import Control.Concurrent.Async (Async, cancel)
+import Data.Foldable (traverse_)
+import System.IO (hPutStrLn, stderr)
+import Control.Exception.Safe
+
+data BindPortException = BindPortException String
+  deriving (Show, Typeable)
+
+instance Exception BindPortException
 
 -- | Wraps various gRPC state needed to run a server.
 data Server = Server
@@ -57,7 +74,7 @@ data Server = Server
   , listeningPort        :: Port
   , serverCQ             :: CompletionQueue
   -- ^ CQ used for receiving new calls.
-  , serverCallCQ               :: CompletionQueue
+  , serverCallCQ         :: CompletionQueue
   -- ^ CQ for running ops on calls. Not used to receive new calls.
   , normalMethods        :: [RegisteredMethod 'Normal]
   , sstreamingMethods    :: [RegisteredMethod 'ServerStreaming]
@@ -67,6 +84,55 @@ data Server = Server
   , outstandingForks     :: TVar (S.Set ThreadId)
   , serverShuttingDown   :: TVar Bool
   }
+
+-- | Wraps various gRPC state needed to run a server.
+data AsyncServer = AsyncServer
+  { serverGRPC             :: GRPC
+  , unsafeServer           :: C.Server
+  , listeningPort          :: Port
+  , serverCallQueue        :: CompletionQueue
+  -- ^ CQ used for receiving new calls from clients.
+  , serverOpsQueue         :: CompletionQueue
+  -- ^ CQ for running or reading operations on calls. Not used to receive new calls.
+  , normalAsyncMethods     :: [RegisteredMethod 'Normal]
+  , serverConfig           :: ServerConfig
+  , outstandingCallActions :: TVar (HashMap ThreadId (Async ()))
+  -- ^ A Map of ThreadIds and async operations representing in progress call actions.
+  -- Used to cancel outstanding actions on server shutdown.
+  , inProgressCallStates   :: TVar (HashMap C.Tag CallState)
+    -- ^ A HashMap of call tags and call states representing in-progress call states.
+    -- Used to lookup and run the next step of an in-progress call.
+  , serverShuttingDown     :: TVar Bool
+  }
+
+data CallState where
+  Listen :: CallState
+  -- ^ Register the server to listen for new requests.
+  StartRequest :: Ptr C.Call -> C.CallDetails -> C.MetadataArray -> C.Tag -> IO () -> CallState
+  -- ^ Start a request when a call comes in from a client.
+  ReceivePayload :: U.ServerCall -> C.Tag -> C.OpArray -> [OpContext] -> IO () -> CallState
+  -- ^ Read the client payload from the given context and deliver a message to the client.
+  AcknowledgeResponse :: C.Tag -> C.OpArray -> [OpContext] -> IO () -> CallState
+  -- ^ Cleanup the client's call.
+
+lookupCall :: AsyncServer -> C.Tag -> IO (Maybe CallState)
+lookupCall s t = atomically $ do
+  states <- readTVar (inProgressCallStates s)
+  let state = HashMap.lookup t states
+  check (isJust state)
+  pure state
+
+
+insertCall :: AsyncServer -> C.Tag -> CallState -> IO ()
+insertCall s t state = atomically $ modifyTVar' (inProgressCallStates s) (HashMap.insert t state)
+
+
+replaceCall :: AsyncServer -> C.Tag -> CallState -> IO ()
+replaceCall s t state = atomically $ modifyTVar' (inProgressCallStates s) (HashMap.insert t state)
+
+
+deleteCall :: AsyncServer -> C.Tag -> IO ()
+deleteCall s t = atomically $ modifyTVar' (inProgressCallStates s) (HashMap.delete t)
 
 -- TODO: should we make a forkGRPC function instead? I am not sure if it would
 -- be safe to let the call handlers threads keep running after the server stops,
@@ -238,6 +304,79 @@ stopServer Server{ unsafeServer = s, .. } = do
 -- Uses 'bracket' to safely start and stop a server, even if exceptions occur.
 withServer :: GRPC -> ServerConfig -> (Server -> IO a) -> IO a
 withServer grpc cfg = bracket (startServer grpc cfg) stopServer
+
+withAsyncServer :: GRPC -> ServerConfig -> (AsyncServer -> IO a) -> IO a
+withAsyncServer grpc cfg = bracket (startAsyncServer grpc cfg) stopAsyncServer
+
+startAsyncServer :: GRPC -> ServerConfig -> IO AsyncServer
+startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \args -> do
+  server <- C.grpcServerCreate args C.reserved
+  actualPort <- addPort server config
+
+  when (unPort port > 0 && actualPort /= unPort port) (throw . BindPortException $ "Unable to bind port: " ++ show port)
+
+  callQueue <- createCompletionQueueForNext grpc
+  serverRegisterCompletionQueue server callQueue
+  opsQueue <- createCompletionQueueForNext grpc
+  grpcDebug $ "startServer: Server Queue: " ++ show callQueue
+
+  let endpoint' = serverEndpoint config
+  ns <- traverse (\nm -> serverRegisterMethodNormal server nm endpoint') methodsToRegisterNormal
+
+  C.grpcServerStart server
+  forks <- newTVarIO mempty
+  shutdown <- newTVarIO False
+  inProgressCallStates <- newTVarIO mempty
+  pure $ AsyncServer grpc server (Port actualPort) callQueue opsQueue ns config forks inProgressCallStates shutdown
+
+-- TODO: Do method handles need to be freed?
+stopAsyncServer :: AsyncServer -> IO ()
+stopAsyncServer AsyncServer{ unsafeServer = server, .. } = do
+  grpcDebug "stopAsyncServer: shutdownNotify serverCallQueue"
+  shutdownQueue' <- createCompletionQueueForNext serverGRPC
+  shutdownNotify shutdownQueue'
+  shutdownQueue shutdownQueue'
+  grpcDebug "stopAsyncServer: cleaning up outstanding requests."
+  cleanupOutstandingRequests
+  grpcDebug "stopAsyncServer: call grpc_server_destroy."
+  C.grpcServerDestroy server
+  -- Queues must be shut down after the server is destroyed.
+  grpcDebug "stopAsyncServer: shutting serverOpsQueue"
+  shutdownQueue serverOpsQueue
+  grpcDebug "stopAsyncServer: shutting serverCallQueue"
+  shutdownQueue serverCallQueue
+
+
+  where shutdownQueue queue = do
+          shutdownResult <- shutdownCompletionQueueForNext queue
+          case shutdownResult of
+            Left GRPCIOTimeout -> do hPutStrLn stderr "stopServer: Could not stop cleanly. Cancelling all calls."
+                                     C.grpcServerCancelAllCalls server
+            Left err -> do hPutStrLn stderr ("Warning: completion queue didn't shut down: " ++ show err)
+                           hPutStrLn stderr "Trying to stop server anyway."
+            Right _ -> return ()
+        shutdownNotify queue = do
+          let shutdownTag = C.tag 0
+          serverShutdownAndNotify server queue shutdownTag
+          grpcDebug "called serverShutdownAndNotify; plucking."
+          shutdownEvent <- next queue 10
+          grpcDebug $ "shutdownNotify: got shutdown event" ++ show shutdownEvent
+          case shutdownEvent of
+            Left GRPCIOShutdown -> error "Called stopServer twice!"
+            Left GRPCIOTimeout -> do
+              hPutStrLn stderr "Could not stop cleanly. Cancelling all calls."
+              C.grpcServerCancelAllCalls server
+            Left err            -> error ("Failed to stop server:" ++ show err)
+            Right _             -> return ()
+        cleanupOutstandingRequests = do
+          atomically $ writeTVar serverShuttingDown True
+          liveCalls <- readTVarIO outstandingCallActions
+          grpcDebug $ "Server shutdown: killing threads: " ++ show (HashMap.keys liveCalls)
+          traverse_ cancel liveCalls
+          -- wait for threads to shut down
+          grpcDebug "Server shutdown: waiting until all threads are dead."
+          atomically $ check . HashMap.null =<< readTVar outstandingCallActions
+          grpcDebug "Server shutdown: All forks cleaned up."
 
 -- | Less precisely-typed registration function used in
 -- 'serverRegisterMethodNormal', 'serverRegisterMethodServerStreaming',

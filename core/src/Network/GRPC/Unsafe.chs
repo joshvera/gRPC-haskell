@@ -13,6 +13,7 @@ import Foreign.Marshal.Alloc (free)
 import Foreign.Ptr
 import Foreign.Storable
 import GHC.Exts (IsString(..))
+import Data.Hashable
 
 {#import Network.GRPC.Unsafe.Time#}
 import Network.GRPC.Unsafe.Constants
@@ -76,7 +77,7 @@ instance Storable Call where
 
 -- | A 'Tag' is an identifier that is used with a 'CompletionQueue' to signal
 -- that the corresponding operation has completed.
-newtype Tag = Tag {unTag :: Ptr ()} deriving (Show, Eq)
+newtype Tag = Tag {unTag :: Ptr ()} deriving (Show, Eq, Hashable)
 
 tag :: Int -> Tag
 tag = Tag . plusPtr nullPtr

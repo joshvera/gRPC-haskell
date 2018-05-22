@@ -536,7 +536,9 @@ grpc_call_credentials* grpc_metadata_credentials_create_from_plugin_(
 //only job is to cast the void* state pointer to the correct function pointer
 //type and call the Haskell function with it.
 void metadata_dispatcher(void *state, grpc_auth_metadata_context context,
- grpc_credentials_plugin_metadata_cb cb, void *user_data){
+                         grpc_credentials_plugin_metadata_cb cb, void *user_data, grpc_metadata creds_md[GRPC_METADATA_CREDENTIALS_PLUGIN_SYNC_MAX],
+                         size_t* num_creds_md, grpc_status_code* status,
+                         const char** error_details){
 
   ((haskell_get_metadata*)state)(&context, cb, user_data);
 }

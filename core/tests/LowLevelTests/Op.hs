@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 module LowLevelTests.Op where
 
@@ -49,7 +50,7 @@ withClientServerUnaryCall grpc f = do
     crm <- clientRegisterMethodNormal c "/foo"
     withServer grpc serverConf $ \s ->
       withClientCall c crm 10 $ \cc -> do
-        let srm = head (normalMethods s)
+        let srm = head (normalMethods (s :: Server))
         -- NOTE: We need to send client ops here or else `withServerCall` hangs,
         -- because registered methods try to do recv ops immediately when
         -- created. If later we want to send payloads or metadata, we'll need

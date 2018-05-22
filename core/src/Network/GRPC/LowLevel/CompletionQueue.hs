@@ -27,6 +27,7 @@ module Network.GRPC.LowLevel.CompletionQueue
   , shutdownCompletionQueueForPluck
   , shutdownCompletionQueueForNext
   , pluck
+  , next
   , startBatch
   , channelCreateCall
   , TimeoutSeconds
@@ -46,7 +47,6 @@ import           Control.Monad.Trans.Except
 import           Data.IORef                                     (newIORef)
 import           Data.List                                      (intersperse)
 import           Foreign.Ptr                                    (nullPtr)
-import qualified Foreign.Marshal.Utils as F
 import           Foreign.Storable                               (peek)
 import           Network.GRPC.LowLevel.Call
 import           Network.GRPC.LowLevel.CompletionQueue.Internal
@@ -90,6 +90,12 @@ createCompletionQueueForPluck _ = do
 -- | Very simple wrapper around 'grpcCallStartBatch'. Throws 'GRPCIOShutdown'
 -- without calling 'grpcCallStartBatch' if the queue is shutting down.
 -- Throws 'CallError' if 'grpcCallStartBatch' returns a non-OK code.
+--
+-- Starts a batch of operations given an array of operations. When complete, posts a completion of type 'tag' to the
+-- given completion queue bound to the call.
+--
+-- Calls to grpcCallStartBatch are synchronized with a call to 'withPermission'. At a future point in time it may be
+-- useful to synchronize send operations differently from receive operations.
 startBatch :: CompletionQueue -> C.Call -> C.OpArray -> Int -> C.Tag
               -> IO (Either GRPCIOError ())
 startBatch cq@CompletionQueue{..} call opArray opArraySize tag =
@@ -100,6 +106,9 @@ startBatch cq@CompletionQueue{..} call opArray opArraySize tag =
       grpcDebug "startBatch: grpc_call_start_batch call returned."
       return res
 
+-- | Create an RPC call on a channel. When created, it is in a configuration state
+-- allowing properties to be set until it is invoked. After invoke, the Call
+-- can have messages written to it and read from it.
 channelCreateCall :: C.Channel
                   -> Maybe (ServerCall a)
                   -> C.PropagationMask
@@ -123,8 +132,10 @@ channelCreateCall
 -- | Create the call object to handle a registered call.
 serverRequestCall :: RegisteredMethod mt
                   -> C.Server
-                  -> CompletionQueue -- ^ server CQ
-                  -> CompletionQueue -- ^ call CQ
+                  -> CompletionQueue
+                  -- ^ The server queue bound to the call.
+                  -> CompletionQueue
+                  -- ^ The request queue for notifications.
                   -> IO (Either GRPCIOError (ServerCall (MethodPayload mt)))
 serverRequestCall rm s scq ccq =
   -- NB: The method type dictates whether or not a payload is present, according
@@ -172,6 +183,14 @@ serverRegisterCompletionQueue :: C.Server -> CompletionQueue -> IO ()
 serverRegisterCompletionQueue server CompletionQueue{..} =
   C.grpcServerRegisterCompletionQueue server unsafeCQ C.reserved
 
+-- | Kills all pending requests for incoming RPC calls, shuts down listening on the port for incoming channels,
+-- then iterates through all channels on the server and sends a shutdown message to the clients.
+--
+-- The transport layer then guarantees the following:
+-- * Sends shutdown to the client (for eg: HTTP2 transport sends GOAWAY).
+-- * If the server has outstanding calls that are in the process, the
+--  connection is NOT closed until the server is done with all those calls.
+-- * Once, there are no more calls in progress, the channel is closed.
 serverShutdownAndNotify :: C.Server -> CompletionQueue -> C.Tag -> IO ()
 serverShutdownAndNotify server CompletionQueue{..} tag =
   C.grpcServerShutdownAndNotify server unsafeCQ tag

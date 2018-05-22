@@ -47,4 +47,4 @@ options :: ServiceOptions
 options = defaultServiceOptions
 
 main :: IO ()
-main = arithmeticServer handlers options
+main = arithmeticServers options

@@ -39,8 +39,10 @@ GRPC
 , ServerConfig(..)
 , Server(normalMethods, sstreamingMethods, cstreamingMethods,
          bidiStreamingMethods)
+, AsyncServer(normalAsyncMethods)
 , ServerCall(payload, metadata)
 , withServer
+, withAsyncServer
 , serverHandleNormalCall
 , ServerHandlerLL
 , withServerCall
