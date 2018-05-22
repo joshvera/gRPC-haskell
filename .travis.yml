@@ -31,4 +31,4 @@ before_install:
 
 script:
 # Build the package, its tests, and its docs and run the tests
-- stack build --docker grpc-haskell-core:tests grpc-haskell:tests --fast
+- stack build --docker grpc-haskell-core:tests grpc-haskell:tests --fast --extra-lib-dirs=/usr/local/lib
