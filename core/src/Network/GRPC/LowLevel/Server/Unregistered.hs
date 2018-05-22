@@ -1,25 +1,26 @@
-{-# LANGUAGE LambdaCase      #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE LambdaCase, RecordWildCards #-}
 
 module Network.GRPC.LowLevel.Server.Unregistered where
 
-import           Control.Exception                                  (finally)
+import           Control.Exception.Safe
 import           Control.Monad
 import           Control.Monad.Trans.Except
-import           Data.ByteString                                    (ByteString)
+import           Data.ByteString (ByteString)
 import           Network.GRPC.LowLevel.Call.Unregistered
 import           Network.GRPC.LowLevel.CompletionQueue.Unregistered (serverRequestCall)
 import           Network.GRPC.LowLevel.GRPC
 import           Network.GRPC.LowLevel.Op
-import           Network.GRPC.LowLevel.Server                       (Server (..),
-                                                                     ServerRWHandlerLL,
-                                                                     ServerReaderHandlerLL,
-                                                                     ServerWriterHandlerLL,
-                                                                     forkServer,
-                                                                     serverReader',
-                                                                     serverWriter',
-                                                                     serverRW')
-import qualified Network.GRPC.Unsafe.Op                             as C
+import           Network.GRPC.LowLevel.Server
+    ( Server (..)
+    , ServerRWHandlerLL
+    , ServerReaderHandlerLL
+    , ServerWriterHandlerLL
+    , forkServer
+    , serverRW'
+    , serverReader'
+    , serverWriter'
+    )
+import qualified Network.GRPC.Unsafe.Op as C
 
 serverCreateCall :: Server
                  -> IO (Either GRPCIOError ServerCall)

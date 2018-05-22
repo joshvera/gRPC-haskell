@@ -45,6 +45,7 @@ lowLevelTests = testGroup "Unit tests of low-level Haskell library"
   , testClientCall
   , testClientTimeoutNoServer
   , testServerCreateDestroy
+  , testAsyncServerCreateDestroy
   , testMixRegisteredUnregistered
   , testPayload
   , testSSL
@@ -91,6 +92,10 @@ testClientTimeoutNoServer =
 testServerCreateDestroy :: TestTree
 testServerCreateDestroy =
   serverOnlyTest "start/stop" (["/foo"],[],[],[]) nop
+
+testAsyncServerCreateDestroy :: TestTree
+testAsyncServerCreateDestroy =
+  asyncServerOnlyTest "start/stop" (["/foo"],[],[],[]) nop
 
 testMixRegisteredUnregistered :: TestTree
 testMixRegisteredUnregistered =
@@ -834,6 +839,13 @@ serverOnlyTest :: TestName
 serverOnlyTest nm ms =
   testCase ("Server - " ++ nm) . runTestServer . TestServer (serverConf ms)
 
+asyncServerOnlyTest :: TestName
+               -> ([MethodName],[MethodName],[MethodName],[MethodName])
+               -> (AsyncServer -> IO ())
+               -> TestTree
+asyncServerOnlyTest nm ms =
+  testCase ("Server - " ++ nm) . runAsyncTestServer . AsyncTestServer (serverConf ms)
+
 clientOnlyTest :: TestName -> (Client -> IO ()) -> TestTree
 clientOnlyTest nm =
   testCase ("Client - " ++ nm) . runTestClient . stdTestClient
@@ -888,10 +900,15 @@ stdClientConf :: ClientConfig
 stdClientConf = ClientConfig "localhost" 50051 [] Nothing
 
 data TestServer = TestServer ServerConfig (Server -> IO ())
+data AsyncTestServer = AsyncTestServer ServerConfig (AsyncServer -> IO ())
 
 runTestServer :: TestServer -> IO ()
 runTestServer (TestServer conf f) =
   runManaged $ mgdGRPC >>= mgdServer conf >>= liftIO . f
+
+runAsyncTestServer :: AsyncTestServer -> IO ()
+runAsyncTestServer (AsyncTestServer conf f) =
+  runManaged $ mgdGRPC >>= mgdAsyncServer conf >>= liftIO . f
 
 defServerConf :: ServerConfig
 defServerConf = ServerConfig "localhost" 50051 [] [] [] [] [] Nothing
@@ -912,3 +929,6 @@ mgdClient conf g = managed $ withClient g conf
 
 mgdServer :: ServerConfig -> GRPC -> Managed Server
 mgdServer conf g = managed $ withServer g conf
+
+mgdAsyncServer :: ServerConfig -> GRPC -> Managed AsyncServer
+mgdAsyncServer conf g = managed $ withAsyncServer g conf

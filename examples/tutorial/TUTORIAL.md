@@ -58,7 +58,7 @@ All we need to do to run a server is call the `arithmeticServer` function:
 
 ```haskell
 main :: IO ()
-main = arithmeticServer handlers options
+main = arithmeticServers options
 ```
 
 So we just need to define `handlers` and `options`.

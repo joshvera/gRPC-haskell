@@ -6,7 +6,7 @@
 
 module Network.GRPC.LowLevel.Op where
 
-import           Control.Exception
+import           Control.Exception.Safe
 import           Control.Monad
 import           Control.Monad.Trans.Except
 import           Data.ByteString                       (ByteString)
@@ -18,7 +18,7 @@ import           Foreign.Ptr                           (Ptr, nullPtr)
 import           Foreign.Storable                      (peek)
 import           Network.GRPC.LowLevel.CompletionQueue
 import           Network.GRPC.LowLevel.GRPC
-import qualified Network.GRPC.Unsafe                   as C (Call)
+import qualified Network.GRPC.Unsafe                   as C (Call, Tag)
 import qualified Network.GRPC.Unsafe.ByteBuffer        as C
 import qualified Network.GRPC.Unsafe.Metadata          as C
 import qualified Network.GRPC.Unsafe.Op                as C
@@ -213,10 +213,9 @@ runOps call cq ops =
       tag <- newTag cq
       grpcDebug $ "runOps: tag: " ++ show tag
       callError <- startBatch cq call opArray l tag
-      grpcDebug $ "runOps: called start_batch. callError: "
-                   ++ (show callError)
+      grpcDebug $ "runOps: called start_batch."
       case callError of
-        Left x -> return $ Left x
+        Left x -> Left x <$ grpcDebug ("runOps: callError:" ++ show callError)
         Right () -> do
           ev <- pluck cq tag Nothing
           grpcDebug $ "runOps: pluck returned " ++ show ev
@@ -225,6 +224,51 @@ runOps call cq ops =
               grpcDebug "runOps: got good op; starting."
               fmap (Right . catMaybes) $ mapM resultFromOpContext contexts
             Left err -> return $ Left err
+
+-- | Reads the list of `OpRecvResult` from the given operation array and contexts and frees them.
+readAndDestroy :: C.OpArray -> [OpContext] -> IO [OpRecvResult]
+readAndDestroy array contexts = results `finally` destroyOpArrayAndContexts array contexts
+  where results = catMaybes <$> traverse resultFromOpContext contexts
+
+
+runOpsAsync :: C.Call
+            -- ^ 'Call' that this batch is associated with. One call can be
+            -- associated with many batches.
+            -> CompletionQueue
+            -- ^ Queue to run the operations on.
+            -> C.Tag
+            -- ^ The Tag associated with the call.
+            -> [Op]
+            -- ^ The list of operations to execute.
+            -> (C.OpArray -> [OpContext] -> IO b)
+            -- ^ A function that yields allocated OpArray and OpContexts.
+            -- You are responsible for freeing these with 'destroyOpArrayAndContexts'.
+            -> IO b
+runOpsAsync call cq tag ops fun = do
+  (opArray, contexts) <- allocOpArrayAndContexts ops
+  grpcDebug $ "runOpsAsync: allocated op contexts: " ++ show contexts
+  grpcDebug $ "runOpsAsync: tag: " ++ show tag
+  grpcDebug $ "runOpsAsync: call: " ++ show call
+  value <- fun opArray contexts
+  callError <- startBatch cq call opArray (length ops) tag `onException` destroyOpArrayAndContexts opArray contexts
+  grpcDebug "runOpsAsync: called start_batch."
+  case callError of
+    Left x -> grpcDebug ("runOpsAsync: callError:" ++ show callError) >> throw x
+    Right () -> pure value
+
+destroyOpArrayAndContexts :: Foldable t => C.OpArray -> t OpContext -> IO ()
+destroyOpArrayAndContexts array contexts = do
+  C.opArrayDestroy array (length contexts)
+  mapM_ freeOpContext contexts
+
+allocOpArrayAndContexts :: [Op] -> IO (C.OpArray, [OpContext])
+allocOpArrayAndContexts ops = do
+  contexts <- traverse createOpContext ops
+  let l = length ops
+  arr <- C.opArrayCreate l
+  sequence_ $ zipWith (setOpArray arr) [0..l-1] contexts
+  return (arr, contexts)
+
 
 runOps' :: C.Call
         -> CompletionQueue

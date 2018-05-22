@@ -42,6 +42,10 @@ library
     , safe ==0.3.*
     , vector
     , sorted-list >=0.1.6.1 && <=0.3
+    , unordered-containers >= 0.2 && <0.3
+    , hashable
+    , safe-exceptions
+    , unix
 
   exposed-modules:
     Network.GRPC.HighLevel
