@@ -35,4 +35,5 @@ install:
 
 script:
 # Build the package, its tests, and its docs and run the tests
-- stack --no-terminal test --haddock --no-haddock-deps --extra-lib-dirs=/usr/local/lib
+- stack --no-terminal build grpc-haskell-core:tests --haddock --no-haddock-deps --extra-lib-dirs=/usr/local/lib
+- stack --no-terminal build grpc-haskell:tests --haddock --no-haddock-deps --extra-lib-dirs=/usr/local/lib
