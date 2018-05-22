@@ -189,7 +189,7 @@ shutdownCompletionQueueForPluck scq@CompletionQueue{..} = do
             C.OpComplete -> drainLoop
 
 shutdownCompletionQueueForNext :: CompletionQueue -> IO (Either GRPCIOError ())
-shutdownCompletionQueueForNext scq@CompletionQueue{..} = do
+shutdownCompletionQueueForNext CompletionQueue{..} = do
   atomically $ writeTVar shuttingDown True
   -- TODO: Probably don't need to check currentPushers and currentPluckers here.
   atomically $ do

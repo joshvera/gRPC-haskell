@@ -13,7 +13,7 @@ import           Control.Exception.Safe hiding (Handler)
 import qualified Control.Exception.Safe as E
 import           Control.Monad
 import           Data.Foldable (find)
-import qualified Data.Map.Strict as Map
+import qualified Data.HashMap.Strict as HashMap
 import qualified Foreign.Marshal.Alloc as C
 import           Foreign.Storable (peek)
 import           Network.GRPC.HighLevel.Server
@@ -171,9 +171,9 @@ asyncDispatchLoop s logger md hN _ _ _ = do
                 wait asyncCall `catchAny` (\ex -> hPutStrLn stderr (show ex)) `finally` cleanup tid
 
               atomically $ do
-                modifyTVar' (outstandingCallActions s) (Map.insert (asyncThreadId asyncCall) asyncCall)
+                modifyTVar' (outstandingCallActions s) (HashMap.insert (asyncThreadId asyncCall) asyncCall)
                 modifyTVar' ready (const True)
-              where cleanup tid = atomically $ modifyTVar' (outstandingCallActions s) (Map.delete tid)
+              where cleanup tid = atomically $ modifyTVar' (outstandingCallActions s) (HashMap.delete tid)
             Nothing -> throw $ NotFound event
         Left GRPCIOTimeout -> pure ()
         Left err -> throw err

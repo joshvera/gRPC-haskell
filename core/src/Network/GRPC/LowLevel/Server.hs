@@ -21,7 +21,7 @@ import           Control.Concurrent                    (ThreadId
                                                         , myThreadId
                                                         , killThread)
 import           Control.Concurrent.STM                (atomically
-                                                        , check, STM)
+                                                        , check)
 import           Control.Concurrent.STM.TVar           (TVar
                                                         , modifyTVar'
                                                         , readTVar
@@ -53,14 +53,11 @@ import qualified Network.GRPC.Unsafe.Op                as C
 import qualified Network.GRPC.Unsafe.Security          as C
 import qualified Data.HashMap.Strict as HashMap
 import Data.HashMap.Strict (HashMap)
-import Data.Map.Strict (Map)
 import Data.Maybe (isJust)
-import qualified Data.Map.Strict as Map
 import qualified Network.GRPC.LowLevel.Call.Unregistered  as U
 import Foreign.Ptr (Ptr)
 import qualified Network.GRPC.Unsafe.Metadata  as C
-import Data.IORef
-import Control.Concurrent.Async (Async, cancel, asyncThreadId)
+import Control.Concurrent.Async (Async, cancel)
 import Data.Foldable (traverse_)
 import System.IO (hPutStrLn, stderr)
 import Control.Exception.Safe
@@ -99,7 +96,7 @@ data AsyncServer = AsyncServer
   -- ^ CQ for running or reading operations on calls. Not used to receive new calls.
   , normalAsyncMethods     :: [RegisteredMethod 'Normal]
   , serverConfig           :: ServerConfig
-  , outstandingCallActions :: TVar (Map ThreadId (Async ()))
+  , outstandingCallActions :: TVar (HashMap ThreadId (Async ()))
   -- ^ A Map of ThreadIds and async operations representing in progress call actions.
   -- Used to cancel outstanding actions on server shutdown.
   , inProgressCallStates   :: TVar (HashMap C.Tag CallState)
@@ -323,8 +320,8 @@ startAsyncServer grpc config@ServerConfig{..} = C.withChannelArgs serverArgs $ \
   opsQueue <- createCompletionQueueForNext grpc
   grpcDebug $ "startServer: Server Queue: " ++ show callQueue
 
-  let endpoint = serverEndpoint config
-  ns <- traverse (\nm -> serverRegisterMethodNormal server nm endpoint) methodsToRegisterNormal
+  let endpoint' = serverEndpoint config
+  ns <- traverse (\nm -> serverRegisterMethodNormal server nm endpoint') methodsToRegisterNormal
 
   C.grpcServerStart server
   forks <- newTVarIO mempty
@@ -374,11 +371,11 @@ stopAsyncServer AsyncServer{ unsafeServer = server, .. } = do
         cleanupOutstandingRequests = do
           atomically $ writeTVar serverShuttingDown True
           liveCalls <- readTVarIO outstandingCallActions
-          grpcDebug $ "Server shutdown: killing threads: " ++ show (Map.keys liveCalls)
+          grpcDebug $ "Server shutdown: killing threads: " ++ show (HashMap.keys liveCalls)
           traverse_ cancel liveCalls
           -- wait for threads to shut down
           grpcDebug "Server shutdown: waiting until all threads are dead."
-          atomically $ check . Map.null =<< readTVar outstandingCallActions
+          atomically $ check . HashMap.null =<< readTVar outstandingCallActions
           grpcDebug "Server shutdown: All forks cleaned up."
 
 -- | Less precisely-typed registration function used in

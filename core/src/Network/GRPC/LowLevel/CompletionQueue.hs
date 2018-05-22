@@ -47,7 +47,6 @@ import           Control.Monad.Trans.Except
 import           Data.IORef                                     (newIORef)
 import           Data.List                                      (intersperse)
 import           Foreign.Ptr                                    (nullPtr)
-import qualified Foreign.Marshal.Utils as F
 import           Foreign.Storable                               (peek)
 import           Network.GRPC.LowLevel.Call
 import           Network.GRPC.LowLevel.CompletionQueue.Internal
