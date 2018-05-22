@@ -1,8 +1,11 @@
 # Use new container infrastructure to enable caching
-sudo: false
+sudo: required
 
 # Do not choose a language; we provide our own build tools.
 language: generic
+
+services:
+  - docker
 
 # Caching so the next build will be fast too.
 cache:
@@ -20,20 +23,12 @@ before_install:
 - mkdir -p ~/.local/bin
 - export PATH=$HOME/.local/bin:$PATH
 - travis_retry curl -L https://get.haskellstack.org/stable/linux-x86_64.tar.gz | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
-# Install grpc
-- sudo apt-get install build-essential autoconf libtool
-- git clone https://github.com/grpc/grpc.git
-- cd grpc
-- git checkout v1.12.0
-- git submodule update --init
-- make
-- sudo make install
+- stack docker pull
 
-install:
-# Build dependencies
-- stack --no-terminal --install-ghc test --only-dependencies --fast --extra-lib-dirs=/usr/local/lib
+# install:
+# # Build dependencies
+# - stack --no-terminal --install-ghc test --only-dependencies --fast --extra-lib-dirs=/usr/local/lib
 
 script:
 # Build the package, its tests, and its docs and run the tests
-- stack --no-terminal build grpc-haskell-core:tests --haddock --no-haddock-deps --extra-lib-dirs=/usr/local/lib
-- stack --no-terminal build grpc-haskell:tests --haddock --no-haddock-deps --extra-lib-dirs=/usr/local/lib
+- stack build --docker grpc-haskell-core:tests grpc-haskell:tests --fast
