@@ -8,13 +8,9 @@ resolver: lts-11.7
 packages:
 - '.'
 - 'core'
-- location:
-    git: https://github.com/joshvera/proto3-suite
-    commit: c75b250e82481e23d2ff586b3e841834b5d93ff9
+- location: vendor/proto3-suite
   extra-dep: true
-- location:
-    git: https://github.com/awakenetworks/proto3-wire
-    commit: c8792bc33154e849239b1c91ffe06af2e765d734
+- location: vendor/proto3-wire
   extra-dep: true
 # Packages to be pulled from upstream that are not in the resolver (e.g., acme-missiles-0.3)
 extra-deps: [ aeson-1.2.4.0
