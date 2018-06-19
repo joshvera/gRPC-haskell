@@ -1,0 +1,3 @@
+[submodule "vendor/proto3-suite"]
+	path = vendor/proto3-suite
+	url = https://github.com/joshvera/proto3-suite.git
