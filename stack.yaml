@@ -10,7 +10,7 @@ packages:
 - 'core'
 - location:
     git: git@github.com:awakenetworks/proto3-suite.git
-    commit: bb66853dcaa7372ef061cf83f39e4ba5193898de
+    commit: 4d3f05dafb322b6e9f47c252063af4a5c039a18b
   extra-dep: true
 - location:
     git: git@github.com:awakenetworks/proto3-wire.git
