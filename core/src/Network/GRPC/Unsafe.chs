@@ -31,7 +31,7 @@ import Network.GRPC.Unsafe.Constants
 {#context prefix = "grpc" #}
 
 newtype StatusDetails = StatusDetails {unStatusDetails :: ByteString}
-  deriving (Eq, IsString, Monoid, Show)
+  deriving (Eq, IsString, Semigroup, Monoid, Show)
 
 {#pointer *grpc_completion_queue_factory as CompletionQueueFactory newtype #}
 
