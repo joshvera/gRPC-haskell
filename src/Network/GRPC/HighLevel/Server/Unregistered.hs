@@ -30,6 +30,7 @@ import qualified Network.GRPC.Unsafe.Time as C
 import           Proto3.Suite.Class
 import           System.IO (hPutStrLn, stderr)
 import qualified System.Posix.Signals as P
+import Numeric.Natural (maxBound)
 
 -- Exceptions that may be thrown during call state execution.
 data CallStateException =
@@ -213,9 +214,10 @@ asyncServerLoop ServerOptions{..} = do
       , serverArgs                       =
           [CompressionAlgArg GrpcCompressDeflate | optUseCompression]
           ++
+          [ MaxReceiveMessageLength (wordToNatural maxBound) ]
+          ++
           [ UserAgentPrefix optUserAgentPrefix
           , UserAgentSuffix optUserAgentSuffix
-          , MaxReceiveMessageLength (2 ^ 32)
           ]
       , sslConfig = optSSLConfig
       }
