@@ -30,7 +30,7 @@ import qualified Network.GRPC.Unsafe.Time as C
 import           Proto3.Suite.Class
 import           System.IO (hPutStrLn, stderr)
 import qualified System.Posix.Signals as P
-import Numeric.Natural (maxBound)
+import GHC.Natural (wordToNatural)
 
 -- Exceptions that may be thrown during call state execution.
 data CallStateException =
