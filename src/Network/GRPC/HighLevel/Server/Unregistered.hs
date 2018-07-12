@@ -215,6 +215,7 @@ asyncServerLoop ServerOptions{..} = do
           ++
           [ UserAgentPrefix optUserAgentPrefix
           , UserAgentSuffix optUserAgentSuffix
+          , MaxReceiveMessageLength (2 ^ 32)
           ]
       , sslConfig = optSSLConfig
       }
