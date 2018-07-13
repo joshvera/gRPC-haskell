@@ -20,7 +20,6 @@ import           Control.Exception                              (bracket)
 import           Data.ByteString                                (ByteString)
 import           Data.ByteString.Char8                          (pack)
 import           Data.List                                      (intersperse)
-import           Data.Monoid
 import           Data.String                                    (IsString)
 import           Foreign.Marshal.Alloc                          (free, malloc)
 import           Foreign.Ptr                                    (Ptr, nullPtr)
