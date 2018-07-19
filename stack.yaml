@@ -8,13 +8,18 @@ resolver: lts-12.0
 packages:
 - '.'
 - 'core'
-- location: vendor/proto3-suite
+- location:
+    git: https://github.com/joshvera/proto3-suite
+    commit: 2e64b578aba4951357e8d423bca9b42c56951817
   extra-dep: true
-- location: vendor/proto3-wire
+- location:
+    git: https://github.com/joshvera/proto3-wire
+    commit: 7deba8d8a49509a7c9ffab600f0f718b897898ca
   extra-dep: true
 
 # Packages to be pulled from upstream that are not in the resolver (e.g., acme-missiles-0.3)
-extra-deps: []
+extra-deps:
+  - wl-pprint-1.2.1
 
 # Override default flag values for local packages and extra-deps
 flags: {}
