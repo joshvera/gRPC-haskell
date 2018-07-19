@@ -6,10 +6,6 @@ packages:
     git: https://github.com/joshvera/proto3-suite
     commit: 2e64b578aba4951357e8d423bca9b42c56951817
   extra-dep: true
-- location:
-    git: https://github.com/haskell/c2hs
-    commit: 072ec2746e6f59e84ffda78b983430a6f3d06492
-  extra-dep: true
 
 # The following packages have been ignored due to incompatibility with the
 # resolver compiler, dependency conflicts with other packages
