@@ -106,14 +106,14 @@ data AsyncServer = AsyncServer
   }
 
 data CallState where
+  -- | Register the server to listen for new requests.
   Listen :: CallState
-  -- ^ Register the server to listen for new requests.
+  -- | Start a request when a call comes in from a client.
   StartRequest :: Ptr C.Call -> C.CallDetails -> C.MetadataArray -> C.Tag -> IO () -> CallState
-  -- ^ Start a request when a call comes in from a client.
+  -- | Read the client payload from the given context and deliver a message to the client.
   ReceivePayload :: U.ServerCall -> C.Tag -> C.OpArray -> [OpContext] -> IO () -> CallState
-  -- ^ Read the client payload from the given context and deliver a message to the client.
+  -- | Cleanup the client's call.
   AcknowledgeResponse :: C.Tag -> C.OpArray -> [OpContext] -> IO () -> CallState
-  -- ^ Cleanup the client's call.
 
 lookupCall :: AsyncServer -> C.Tag -> IO (Maybe CallState)
 lookupCall s t = atomically $ do
