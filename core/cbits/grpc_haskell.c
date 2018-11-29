@@ -498,10 +498,10 @@ grpc_channel_credentials* grpc_ssl_credentials_create_internal(
   grpc_channel_credentials* creds;
   if(pem_key && pem_cert){
     grpc_ssl_pem_key_cert_pair pair = {pem_key, pem_cert};
-    creds = grpc_ssl_credentials_create(pem_root_certs, &pair, NULL);
+    creds = grpc_ssl_credentials_create(pem_root_certs, &pair, NULL, NULL);
   }
   else{
-    creds = grpc_ssl_credentials_create(pem_root_certs, NULL, NULL);
+    creds = grpc_ssl_credentials_create(pem_root_certs, NULL, NULL, NULL);
   }
   return creds;
 }
