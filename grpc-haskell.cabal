@@ -26,8 +26,8 @@ library
       base >=4.8 && <5.0
     , clock >=0.6.0 && <0.8.0
     , bytestring ==0.10.*
-    , stm == 2.4.*
-    , containers ==0.5.*
+    , stm >= 2.4 && <2.6
+    , containers >=0.5 && < 0.7
     , managed >= 1.0.0 && < 1.1
     , pipes >=4.1 && <=4.4
     , transformers
@@ -70,7 +70,7 @@ executable hellos-server
       base >=4.8 && <5.0
       , async
       , bytestring == 0.10.*
-      , containers ==0.5.*
+      , containers >=0.5 && < 0.7
       , grpc-haskell
       , grpc-haskell-core
       , proto3-suite
@@ -90,7 +90,7 @@ executable hellos-client
       base >=4.8 && <5.0
       , async
       , bytestring == 0.10.*
-      , containers ==0.5.*
+      , containers >=0.5 && < 0.7
       , grpc-haskell
       , grpc-haskell-core
       , proto3-suite
@@ -110,7 +110,7 @@ executable echo-server
       base >=4.8 && <5.0
       , async
       , bytestring == 0.10.*
-      , containers ==0.5.*
+      , containers >=0.5 && < 0.7
       , grpc-haskell
       , grpc-haskell-core
       , optparse-generic
@@ -134,7 +134,7 @@ executable arithmetic-server
       base >=4.8 && <5.0
       , async
       , bytestring == 0.10.*
-      , containers ==0.5.*
+      , containers >=0.5 && < 0.7
       , grpc-haskell
       , grpc-haskell-core
       , optparse-generic
@@ -157,7 +157,7 @@ executable arithmetic-client
       base >=4.8 && <5.0
       , async
       , bytestring == 0.10.*
-      , containers ==0.5.*
+      , containers >=0.5 && < 0.7
       , grpc-haskell
       , grpc-haskell-core
       , optparse-generic
@@ -180,7 +180,7 @@ executable echo-client
       base >=4.8 && <5.0
       , async
       , bytestring == 0.10.*
-      , containers ==0.5.*
+      , containers >=0.5 && < 0.7
       , grpc-haskell
       , grpc-haskell-core
       , optparse-generic
@@ -209,7 +209,7 @@ test-suite tests
     , tasty >= 1.0 && <1.2
     , tasty-hunit >= 0.10 && <0.11
     , tasty-quickcheck >= 0.9.2 && < 0.11
-    , containers ==0.5.*
+    , containers >=0.5 && < 0.7
     , managed >= 1.0.0 && < 1.1
     , pipes >=4.1 && <=4.4
     , proto3-suite
