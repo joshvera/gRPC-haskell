@@ -1,10 +1,10 @@
-resolver: lts-12.0
+resolver: nightly-2018-12-01
 
 packages:
 - '.'
 - location:
     git: https://github.com/joshvera/proto3-suite
-    commit: 2e64b578aba4951357e8d423bca9b42c56951817
+    commit: 591e19c783b19bf91573f28fe4d12882fbc5809d
   extra-dep: true
 
 # The following packages have been ignored due to incompatibility with the
