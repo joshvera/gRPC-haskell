@@ -36,7 +36,7 @@ library
     , grpc-haskell-core
 
     , async >= 2.1 && <2.3
-    , tasty >= 1.0 && <1.2
+    , tasty >= 1.0 && <2
     , tasty-hunit >= 0.10 && <0.11
     , tasty-quickcheck >= 0.9.2 && < 0.11
     , safe ==0.3.*
@@ -206,7 +206,7 @@ test-suite tests
     , unix
     , time
     , async
-    , tasty >= 1.0 && <1.2
+    , tasty >= 1.0 && <2
     , tasty-hunit >= 0.10 && <0.11
     , tasty-quickcheck >= 0.9.2 && < 0.11
     , containers >=0.5 && < 0.7
